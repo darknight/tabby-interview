@@ -4,6 +4,10 @@ members = [
     "crates/ws-common",
     "crates/ws-sender",
     "crates/ws-receiver",
+    "crates/ws-cli",
+]
+default-members = [
+    "crates/ws-cli",
 ]
 
 [workspace.dependencies]

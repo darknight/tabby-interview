@@ -1,0 +1,13 @@
+[package]
+name = "ws-cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "sync-directory"
+path = "src/main.rs"
+
+[dependencies]
+ws-sender = { path = "../ws-sender" }
+ws-receiver = { path = "../ws-receiver" }
+clap = { workspace = true }
