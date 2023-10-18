@@ -1,0 +1,17 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/ws-common",
+    "crates/ws-sender",
+    "crates/ws-receiver",
+]
+
+[workspace.dependencies]
+tokio = "1.32"
+tokio-tungstenite = "0.20"
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "1.0"
+log = "0.4"
+env_logger = "0.10"
+walkdir = "2"
+clap = "4.3.23"
