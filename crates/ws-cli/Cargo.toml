@@ -8,6 +8,10 @@ name = "sync-directory"
 path = "src/main.rs"
 
 [dependencies]
+ws-common = { path = "../ws-common" }
 ws-sender = { path = "../ws-sender" }
 ws-receiver = { path = "../ws-receiver" }
 clap = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+tokio = { workspace = true }

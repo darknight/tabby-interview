@@ -5,3 +5,5 @@ edition = "2021"
 
 [dependencies]
 ws-common = { path = "../ws-common" }
+tokio = { workspace = true }
+tokio-tungstenite = { workspace = true }

@@ -11,11 +11,12 @@ default-members = [
 ]
 
 [workspace.dependencies]
-tokio = "1.32"
+tokio = { version = "1.32", features = ["full"] } # FIXME: full?
 tokio-tungstenite = "0.20"
+futures = "0.3"
 serde = { version = "1.0", features = ["derive"] }
 thiserror = "1.0"
 log = "0.4"
 env_logger = "0.10"
 walkdir = "2"
-clap = "4.3.23"
+clap = { version = "4.3.23", features = ["derive"] }

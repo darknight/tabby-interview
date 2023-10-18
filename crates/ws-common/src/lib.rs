@@ -1,14 +1,37 @@
-pub fn add(left: usize, right: usize) -> usize {
-    left + right
+use thiserror::Error;
+use tokio_tungstenite::tungstenite;
+
+pub type Result<T> = std::result::Result<T, AppError>;
+
+#[derive(Debug, Error)]
+pub enum AppError {
+    /// Invalid port number
+    #[error("Invalid port number: {0}")]
+    InvalidPort(u16),
+    /// Port in use
+    #[error("Port {0} is already in use")]
+    PortInUse(u16),
+    /// Directory is not a directory
+    #[error("Invalid directory: {0}")]
+    InvalidDir(String),
+    /// Directory is in use
+    #[error("Directory {0} is in use by other receiver")]
+    DirInUse(String),
+    /// Failed to create directory
+    #[error("Failed to create directory: {0}")]
+    FailedCreateDir(std::io::Error),
+    /// Failed to bind to address
+    #[error("Failed to bind to address: {0}")]
+    FailedBind(std::io::Error),
+    /// Failed to write to file
+    #[error("Failed to write to file: {0}")]
+    FailedWriteFile(std::io::Error),
+    /// Failed to delete file
+    #[error("Failed to delete file: {0}")]
+    FailedDeleteFile(std::io::Error),
+    /// Websocket error
+    #[error("Websocket error: {0}")]
+    WsError(#[from] tungstenite::error::Error),
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+// TODO: SyncError
