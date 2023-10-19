@@ -10,3 +10,4 @@
 
 ## Improvement
 - Add command line argument to control logging level and output file
+- Increase test coverage

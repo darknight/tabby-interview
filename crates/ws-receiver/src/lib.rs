@@ -26,7 +26,7 @@ impl WsReceiver {
     /// If `output_dir` doesn't exist, it will be created first.
     ///
     /// After the check, we'll try to bind to `ADDR:port` and start listening.
-    pub async fn init(port: u16, output_dir: String) -> Result<WsReceiver> {
+    pub async fn new(port: u16, output_dir: String) -> Result<WsReceiver> {
         // check port
         if port < 1024 || port > 65535 {
             return Err(AppError::InvalidPort(port));
@@ -34,18 +34,18 @@ impl WsReceiver {
 
         // check output_dir
         let out_dir = Path::new(&output_dir);
-        if !out_dir.is_dir() {
-            return Err(AppError::InvalidDir(output_dir.clone()));
-        }
-        if !out_dir.exists() {
-            // create output_dir
-            fs::create_dir_all(out_dir).await.map_err(AppError::FailedCreateDir)?;
-        } else {
+        if out_dir.exists() {
+            if !out_dir.is_dir() {
+                return Err(AppError::InvalidDir(output_dir.clone()));
+            }
             // check if `PID_FILE` file exists
             let pid_file = out_dir.join(PID_FILE);
             if pid_file.exists() {
                 return Err(AppError::DirInUse(output_dir.clone()));
             }
+        } else {
+            // create output_dir
+            fs::create_dir_all(out_dir).await.map_err(AppError::FailedCreateDir)?;
         }
 
         // start receiver server

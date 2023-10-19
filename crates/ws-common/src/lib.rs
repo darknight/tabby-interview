@@ -5,6 +5,9 @@ pub type Result<T> = std::result::Result<T, AppError>;
 
 #[derive(Debug, Error)]
 pub enum AppError {
+    /// Invalid command line arguments
+    #[error("Invalid command line arguments: {0}")]
+    InvalidArgs(String),
     /// Invalid port number
     #[error("Invalid port number: {0}")]
     InvalidPort(u16),
@@ -32,6 +35,9 @@ pub enum AppError {
     /// Websocket error
     #[error("Websocket error: {0}")]
     WsError(#[from] tungstenite::error::Error),
+    /// Websocket address parse error
+    #[error("Websocket address parse error: {0}")]
+    WsAddrParseError(#[from] url::ParseError),
 }
 
 // TODO: SyncError

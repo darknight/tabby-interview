@@ -7,3 +7,6 @@ edition = "2021"
 ws-common = { path = "../ws-common" }
 tokio = { workspace = true }
 tokio-tungstenite = { workspace = true }
+futures = { workspace = true }
+log = { workspace = true }
+url = { workspace = true }
