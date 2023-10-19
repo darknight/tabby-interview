@@ -1,3 +1,6 @@
+mod model;
+pub use model::{EntryType, FileEntry, FileMeta, FileChunk};
+
 use thiserror::Error;
 use tokio_tungstenite::tungstenite;
 
@@ -26,18 +29,27 @@ pub enum AppError {
     /// Failed to bind to address
     #[error("Failed to bind to address: {0}")]
     FailedBind(std::io::Error),
+    /// Failed to open file
+    #[error("Failed to open file: {0}")]
+    FailedOpenFile(std::io::Error),
     /// Failed to write to file
     #[error("Failed to write to file: {0}")]
     FailedWriteFile(std::io::Error),
     /// Failed to delete file
     #[error("Failed to delete file: {0}")]
     FailedDeleteFile(std::io::Error),
+    /// Failed to read file
+    #[error("Failed to read file: {0}")]
+    FailedReadFile(std::io::Error),
     /// Websocket error
     #[error("Websocket error: {0}")]
     WsError(#[from] tungstenite::error::Error),
     /// Websocket address parse error
     #[error("Websocket address parse error: {0}")]
     WsAddrParseError(#[from] url::ParseError),
+    /// Tokio join handle error
+    #[error("Tokio join handle error: {0}")]
+    TokioJoinError(#[from] tokio::task::JoinError),
 }
 
 // TODO: SyncError

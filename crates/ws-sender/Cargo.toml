@@ -10,3 +10,4 @@ tokio-tungstenite = { workspace = true }
 futures = { workspace = true }
 log = { workspace = true }
 url = { workspace = true }
+walkdir = { workspace = true }
