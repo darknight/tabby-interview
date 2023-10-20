@@ -8,7 +8,7 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::Sender;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, tungstenite, WebSocketStream};
-use ws_common::{Result, AppError, EntryType, FileMeta, FileChunk, FileEntry, WsRequest, WsResponse};
+use ws_common::{Result, AppError, EntryType, FileMeta, FileChunk, FileEntry, WsRequest, WsResponse, walk_dir};
 use walkdir::{DirEntry, WalkDir};
 
 const CHANNEL_CAPACITY: usize = 10;
@@ -70,7 +70,7 @@ impl WsStream {
 
         // spawn blocking task to walk directory
         let meta_infos = tokio::task::spawn_blocking(move || {
-            walk_dir(from_dir)
+            walk_dir(from_dir, false)
         }).await?;
 
         let file_metas = meta_infos.iter().map(|meta| meta.0.clone()).collect::<Vec<FileMeta>>();
@@ -134,37 +134,6 @@ impl WsStream {
 
         Ok(())
     }
-}
-
-fn walk_dir(from_dir: String) -> Vec<(FileMeta, DirEntry)> {
-    let mut meta_infos = Vec::new();
-
-    // the first item yielded by `WalkDir` is the root directory itself, so we skip it
-    for dir_entry in WalkDir::new(from_dir.as_str()).into_iter().skip(1) {
-        if let Err(err) = dir_entry {
-            error!("[Sender] walk dir error: {}", err);
-            continue;
-        }
-        let dir_entry = dir_entry.unwrap();
-
-        let entry_type = if dir_entry.file_type().is_dir() { EntryType::Dir } else if dir_entry.file_type().is_file() { EntryType::File } else { EntryType::SymLink };
-
-        // since the entry is from `from_dir`, we can safely unwrap here
-        let rel_path = dir_entry.path().strip_prefix(from_dir.as_str()).unwrap().to_str();
-        if rel_path.is_none() {
-            warn!("[Sender] invalid rel path: {:?}", rel_path);
-            continue;
-        }
-        let rel_path = rel_path.unwrap().to_string();
-        let file_meta = FileMeta::new(rel_path, entry_type.clone());
-        debug!("file meta: {:?}", file_meta);
-        if entry_type != EntryType::SymLink {
-            // save file meta for comparing with receiver's files
-            // ignore symlink on purpose
-            meta_infos.push((file_meta, dir_entry));
-        }
-    }
-    meta_infos
 }
 
 async fn create_file_entry(tx: Sender<FileEntry>, dir_entry: DirEntry, file_meta: FileMeta) -> Result<()> {

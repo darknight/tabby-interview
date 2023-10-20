@@ -115,6 +115,10 @@ impl FileEntry {
     pub fn is_dir(&self) -> bool {
         self.file_meta.entry_type == EntryType::Dir
     }
+
+    pub fn file_meta(&self) -> FileMeta {
+        self.file_meta.clone()
+    }
 }
 
 /// Communication protocol between sender and receiver
@@ -153,4 +157,20 @@ pub enum WsResponse {
     /// due to some reason (e.g. permission), sender will skip these files or directories during syncing
     /// On success, Vec<FileMeta> is empty
     DeleteDone(Vec<FileMeta>)
+}
+
+impl WsResponse {
+    /// Create write success message
+    pub fn new_write_success_message(file_meta: FileMeta) -> Result<tungstenite::Message> {
+        let ws_resp = WsResponse::WriteSuccess(file_meta);
+        let message = tungstenite::Message::Text(serde_json::to_string(&ws_resp)?);
+        Ok(message)
+    }
+
+    /// Create write failed message
+    pub fn new_write_failed_message(file_meta: FileMeta) -> Result<tungstenite::Message> {
+        let ws_resp = WsResponse::WriteFailed(file_meta);
+        let message = tungstenite::Message::Text(serde_json::to_string(&ws_resp)?);
+        Ok(message)
+    }
 }

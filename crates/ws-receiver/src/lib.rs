@@ -3,15 +3,19 @@ use std::net::SocketAddr;
 use log::{debug, error, info, warn};
 use tokio::fs;
 use tokio::net::{TcpListener, TcpStream};
-use ws_common::{Result, AppError, WsRequest, FileEntry};
+use ws_common::{Result, AppError, WsRequest, FileEntry, walk_dir, FileMeta, WsResponse};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use futures::StreamExt;
+use futures::{SinkExt, StreamExt};
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
+use tokio::sync::mpsc;
+use tokio::sync::mpsc::Sender;
+use tokio_tungstenite::tungstenite;
 use tokio_tungstenite::tungstenite::Message;
 
 const ADDR: &'static str = "0.0.0.0";
 const PID_FILE: &'static str = ".receiver.pid";
+const CHANNEL_CAPACITY: usize = 10;
 
 #[derive(Debug)]
 pub struct WsReceiver {
@@ -120,7 +124,23 @@ async fn handle_connection(output_dir: String, peer: Arc<Mutex<Option<SocketAddr
     //     return Ok(());
     // }
 
-    let fut = incoming.for_each(|msg| async {
+    // accept new connection, clear local dir first
+    clear_dir(output_dir.clone()).await?;
+
+    // create channel to collect file entry from tasks
+    let (tx, mut rx) = mpsc::channel::<tungstenite::Message>(CHANNEL_CAPACITY);
+
+    // spawn a task to collect write file message and send them to sender
+    tokio::spawn(async move {
+        while let Some(msg) = rx.recv().await {
+            info!("[Receiver] prepare to send ws message: {:?}", msg);
+            if let Err(err) = outgoing.send(msg).await {
+                error!("[Receiver] failed to send ws message: {}", err);
+            }
+        }
+    });
+
+    while let Some(msg) = incoming.next().await {
         match msg {
             Ok(msg) => {
                 match msg {
@@ -128,15 +148,37 @@ async fn handle_connection(output_dir: String, peer: Arc<Mutex<Option<SocketAddr
                         let ws_req = serde_json::from_str::<WsRequest>(&text);
                         if ws_req.is_err() {
                             error!("[Receiver] failed to parse message: {}", text);
-                            return;
+                            continue;
                         }
                         let ws_req = ws_req.unwrap();
                         debug!("[Receiver] received message: {:?}", ws_req);
                         match ws_req {
                             WsRequest::WriteFile(file_entry) => {
-                                let res = write_file(output_dir.clone(), file_entry).await;
+                                let tx = tx.clone();
+                                let out = output_dir.clone();
+                                tokio::spawn(async move {
+                                    let file_meta = file_entry.file_meta();
+                                    let resp = match write_file(out, file_entry).await {
+                                        Ok(_) => {
+                                            WsResponse::new_write_success_message(file_meta)
+                                        }
+                                        Err(err) => {
+                                            error!("[Receiver] write file error: {:?}", err);
+                                            WsResponse::new_write_failed_message(file_meta)
+                                        }
+                                    };
+                                    if let Err(err) = resp {
+                                        error!("[Receiver] failed to create ws response: {:?}", err);
+                                        return;
+                                    }
+                                    if let Err(err) = tx.send(resp.unwrap()).await {
+                                        error!("[Receiver] failed to send ws response: {}", err);
+                                    }
+                                });
                             },
-                            _ => {}
+                            WsRequest::ListDir(file_metas) => {
+                                warn!("[Receiver] received list dir message, ignore...");
+                            }
                         }
                     },
                     _ => {}
@@ -146,8 +188,26 @@ async fn handle_connection(output_dir: String, peer: Arc<Mutex<Option<SocketAddr
                 error!("[Receiver] read message error: {}", err);
             }
         }
-    }).await;
+    }
 
+    Ok(())
+}
+
+/// Remote all files and directories in `output_dir`
+async fn clear_dir(output_dir: String) -> Result<()> {
+    let mut entries = fs::read_dir(&output_dir).await.map_err(AppError::FailedReadDir)?;
+    while let Some(entry) = entries.next_entry().await.map_err(AppError::DirEntryError)? {
+        let path = entry.path();
+        if path.is_dir() {
+            if let Err(err) = fs::remove_dir_all(path.as_path()).await {
+                error!("failed to remove dir: {}, error: {}", path.display(), err);
+            }
+        } else {
+            if let Err(err) = fs::remove_file(path.as_path()).await {
+                error!("failed to remove file: {}, error: {}", path.display(), err);
+            }
+        }
+    }
     Ok(())
 }
 
@@ -173,6 +233,8 @@ async fn write_file(output_dir: String, file_entry: FileEntry) -> Result<()> {
         // seek to offset, then write
         file.seek(std::io::SeekFrom::Start(file_entry.file_offset().unwrap_or(0))).await.map_err(AppError::FailedSeekFile)?;
         file.write_all(file_entry.file_content().unwrap_or(&[])).await.map_err(AppError::FailedWriteFile)?;
+    } else {
+        // TODO
     }
 
     Ok(())
