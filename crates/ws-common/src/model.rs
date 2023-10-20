@@ -1,6 +1,8 @@
 use std::cmp::Ordering;
 use std::fmt::Debug;
 use serde::{Deserialize, Serialize};
+use tokio_tungstenite::tungstenite;
+use crate::Result;
 
 /// File entry type
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -124,6 +126,22 @@ pub enum WsRequest {
     ListDir(Vec<FileMeta>),
 }
 
+impl WsRequest {
+    /// Create write file message
+    pub fn new_write_file_message(file_entry: FileEntry) -> Result<tungstenite::Message> {
+        let ws_req = WsRequest::WriteFile(file_entry);
+        let message = tungstenite::Message::Text(serde_json::to_string(&ws_req)?);
+        Ok(message)
+    }
+
+    /// Create list dir message
+    pub fn new_list_dir_message(file_metas: Vec<FileMeta>) -> Result<tungstenite::Message> {
+        let ws_req = WsRequest::ListDir(file_metas);
+        let message = tungstenite::Message::Text(serde_json::to_string(&ws_req)?);
+        Ok(message)
+    }
+}
+
 /// Communication protocol between sender and receiver
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum WsResponse {
@@ -131,9 +149,8 @@ pub enum WsResponse {
     WriteSuccess(FileMeta),
     /// Write file failure response
     WriteFailed(FileMeta),
-    /// Delete file response
-    DeleteDone {
-        success: Vec<FileMeta>,
-        failed: Vec<FileMeta>,
-    }
+    /// Delete file response, Vec<FileMeta> is the list of files that failed to delete
+    /// due to some reason (e.g. permission), sender will skip these files or directories during syncing
+    /// On success, Vec<FileMeta> is empty
+    DeleteDone(Vec<FileMeta>)
 }
