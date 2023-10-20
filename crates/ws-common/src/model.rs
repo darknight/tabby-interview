@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use std::fmt::Debug;
 use serde::{Deserialize, Serialize};
 
 /// File entry type
@@ -72,10 +73,20 @@ impl FileChunk {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct FileEntry {
     file_meta: FileMeta,
     file_chunk: Option<FileChunk>,
+}
+
+impl Debug for FileEntry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FileEntry")
+            .field("file_meta", &self.file_meta)
+            .field("file_chunk_size", &self.file_chunk
+                .as_ref().map_or(0, |chunk| chunk.payload.len()))
+            .finish()
+    }
 }
 
 impl FileEntry {
@@ -83,11 +94,46 @@ impl FileEntry {
         Self { file_meta, file_chunk }
     }
 
-    pub fn file_meta(&self) -> &FileMeta {
-        &self.file_meta
+    pub fn file_offset(&self) -> Option<u64> {
+        self.file_chunk.as_ref().map(|c| c.offset)
     }
 
-    pub fn file_chunk(&self) -> Option<&FileChunk> {
-        self.file_chunk.as_ref()
+    pub fn file_content(&self) -> Option<&[u8]> {
+        self.file_chunk.as_ref().map(|c| c.payload.as_slice())
+    }
+
+    pub fn rel_path(&self) -> &str {
+        &self.file_meta.rel_path
+    }
+
+    pub fn is_file(&self) -> bool {
+        self.file_meta.entry_type == EntryType::File
+    }
+
+    pub fn is_dir(&self) -> bool {
+        self.file_meta.entry_type == EntryType::Dir
+    }
+}
+
+/// Communication protocol between sender and receiver
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum WsRequest {
+    /// Write file request, meta info + file chunk
+    WriteFile(FileEntry),
+    /// File meta list from sender, receiver will delete local files that are not in this list
+    ListDir(Vec<FileMeta>),
+}
+
+/// Communication protocol between sender and receiver
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum WsResponse {
+    /// Write file success response
+    WriteSuccess(FileMeta),
+    /// Write file failure response
+    WriteFailed(FileMeta),
+    /// Delete file response
+    DeleteDone {
+        success: Vec<FileMeta>,
+        failed: Vec<FileMeta>,
     }
 }

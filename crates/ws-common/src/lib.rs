@@ -1,5 +1,5 @@
 mod model;
-pub use model::{EntryType, FileEntry, FileMeta, FileChunk};
+pub use model::{EntryType, FileEntry, FileMeta, FileChunk, WsRequest, WsResponse};
 
 use thiserror::Error;
 use tokio::sync::mpsc;
@@ -24,15 +24,26 @@ pub enum AppError {
     /// Directory is in use
     #[error("Directory {0} is in use by other receiver")]
     DirInUse(String),
+
+    // ----------------------std io error----------------------
     /// Failed to create directory
     #[error("Failed to create directory: {0}")]
     FailedCreateDir(std::io::Error),
+    /// Failed to delete directory
+    #[error("Failed to delete directory: {0}")]
+    FailedDeleteDir(std::io::Error),
     /// Failed to bind to address
     #[error("Failed to bind to address: {0}")]
     FailedBind(std::io::Error),
+    /// Failed to create file
+    #[error("Failed to create file: {0}")]
+    FailedCreateFile(std::io::Error),
     /// Failed to open file
     #[error("Failed to open file: {0}")]
     FailedOpenFile(std::io::Error),
+    /// Failed to seek file
+    #[error("Failed to seek file: {0}")]
+    FailedSeekFile(std::io::Error),
     /// Failed to write to file
     #[error("Failed to write to file: {0}")]
     FailedWriteFile(std::io::Error),
@@ -42,6 +53,8 @@ pub enum AppError {
     /// Failed to read file
     #[error("Failed to read file: {0}")]
     FailedReadFile(std::io::Error),
+
+    // ----------------------tokio & websocket error----------------------
     /// Websocket error
     #[error("Websocket error: {0}")]
     WsError(#[from] tungstenite::error::Error),
@@ -54,6 +67,7 @@ pub enum AppError {
     /// Tokio send error
     #[error("Tokio send error: {0}")]
     TokioSendError(#[from] mpsc::error::SendError<FileEntry>),
+
     /// Serde_json error
     #[error("Serde_json error: {0}")]
     SerdeJsonError(#[from] serde_json::Error),

@@ -8,7 +8,7 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::Sender;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, tungstenite, WebSocketStream};
-use ws_common::{Result, AppError, EntryType, FileMeta, FileChunk, FileEntry};
+use ws_common::{Result, AppError, EntryType, FileMeta, FileChunk, FileEntry, WsRequest, WsResponse};
 use walkdir::{DirEntry, WalkDir};
 
 const CHANNEL_CAPACITY: usize = 10;
@@ -76,8 +76,9 @@ impl WsStream {
         // receive file entry from channel and send to websocket
         while let Some(file_entry) = rx.recv().await {
             debug!("[Sender] file entry: {:?}", file_entry);
-            let file_entry = serde_json::to_string(&file_entry)?;
-            write.send(tungstenite::Message::Text(file_entry)).await?;
+            let ws_req = WsRequest::WriteFile(file_entry);
+            let message = tungstenite::Message::Text(serde_json::to_string(&ws_req)?);
+            write.send(message).await?;
         }
 
         Ok(())
