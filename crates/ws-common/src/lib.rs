@@ -2,6 +2,7 @@ mod model;
 pub use model::{EntryType, FileEntry, FileMeta, FileChunk};
 
 use thiserror::Error;
+use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite;
 
 pub type Result<T> = std::result::Result<T, AppError>;
@@ -50,6 +51,12 @@ pub enum AppError {
     /// Tokio join handle error
     #[error("Tokio join handle error: {0}")]
     TokioJoinError(#[from] tokio::task::JoinError),
+    /// Tokio send error
+    #[error("Tokio send error: {0}")]
+    TokioSendError(#[from] mpsc::error::SendError<FileEntry>),
+    /// Serde_json error
+    #[error("Serde_json error: {0}")]
+    SerdeJsonError(#[from] serde_json::Error),
 }
 
 // TODO: SyncError

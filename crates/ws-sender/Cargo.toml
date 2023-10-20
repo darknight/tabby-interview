@@ -11,3 +11,5 @@ futures = { workspace = true }
 log = { workspace = true }
 url = { workspace = true }
 walkdir = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

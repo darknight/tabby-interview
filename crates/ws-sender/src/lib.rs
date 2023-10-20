@@ -1,13 +1,17 @@
 use std::collections::BTreeSet;
 use std::os::windows::fs::FileTypeExt;
 use std::path::Path;
-use futures::StreamExt;
+use futures::{SinkExt, StreamExt};
 use log::{debug, error, info, warn};
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
-use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
+use tokio::sync::mpsc;
+use tokio::sync::mpsc::Sender;
+use tokio_tungstenite::{connect_async, MaybeTlsStream, tungstenite, WebSocketStream};
 use ws_common::{Result, AppError, EntryType, FileMeta, FileChunk, FileEntry};
 use walkdir::{DirEntry, WalkDir};
+
+const CHANNEL_CAPACITY: usize = 10;
 
 /// Websocket sender
 #[derive(Debug, Clone)]
@@ -59,34 +63,44 @@ impl WsStream {
     pub async fn sync_dir(self) -> Result<()> {
         let from_dir = self.from_dir.clone();
         info!("[Sender] from directory: {}", from_dir);
-        let (write, read) = self.ws_stream.split();
+        let (mut write, read) = self.ws_stream.split();
+
+        // create channel to collect file entry from tasks
+        let (tx, mut rx) = mpsc::channel::<FileEntry>(CHANNEL_CAPACITY);
 
         // spawn blocking task to walk directory
         let mut meta_set = tokio::task::spawn_blocking(move || {
-            walk_dir(from_dir)
+            walk_dir(from_dir, tx)
         }).await?;
+
+        // receive file entry from channel and send to websocket
+        while let Some(file_entry) = rx.recv().await {
+            debug!("[Sender] file entry: {:?}", file_entry);
+            let file_entry = serde_json::to_string(&file_entry)?;
+            write.send(tungstenite::Message::Text(file_entry)).await?;
+        }
 
         Ok(())
     }
 }
 
-fn walk_dir(from_dir: String) -> BTreeSet<FileMeta> {
+fn walk_dir(from_dir: String, tx: Sender<FileEntry>) -> BTreeSet<FileMeta> {
     let mut meta_set = BTreeSet::new();
 
     // the first item yielded by `WalkDir` is the root directory itself, so we skip it
-    for entry in WalkDir::new(from_dir.as_str()).into_iter().skip(1) {
-        if let Err(err) = entry {
+    for dir_entry in WalkDir::new(from_dir.as_str()).into_iter().skip(1) {
+        if let Err(err) = dir_entry {
             error!("[Sender] walk dir error: {}", err);
             continue;
         }
-        let entry = entry.unwrap();
+        let dir_entry = dir_entry.unwrap();
 
-        let entry_type = if entry.file_type().is_dir() { EntryType::Dir }
-        else if entry.file_type().is_file() { EntryType::File }
+        let entry_type = if dir_entry.file_type().is_dir() { EntryType::Dir }
+        else if dir_entry.file_type().is_file() { EntryType::File }
         else { EntryType::SymLink };
 
         // since the entry is from `from_dir`, we can safely unwrap here
-        let rel_path = entry.path().strip_prefix(from_dir.as_str()).unwrap().to_str();
+        let rel_path = dir_entry.path().strip_prefix(from_dir.as_str()).unwrap().to_str();
         if rel_path.is_none() {
             warn!("[Sender] invalid rel path: {:?}", rel_path);
             continue;
@@ -101,16 +115,16 @@ fn walk_dir(from_dir: String) -> BTreeSet<FileMeta> {
         }
 
         // spawn task to create file entry
-        tokio::spawn(create_file_entry(entry, file_meta));
+        tokio::spawn(create_file_entry(tx.clone(), dir_entry, file_meta));
     }
 
     meta_set
 }
 
-async fn create_file_entry(raw_entry: DirEntry, file_meta: FileMeta) -> Result<()> {
+async fn create_file_entry(tx: Sender<FileEntry>, dir_entry: DirEntry, file_meta: FileMeta) -> Result<()> {
     let file_chunk = match file_meta.entry_type() {
         EntryType::File => {
-            let mut file = tokio::fs::File::open(raw_entry.path()).await
+            let mut file = tokio::fs::File::open(dir_entry.path()).await
                 .map_err(AppError::FailedOpenFile)?;
             let mut file_chunk = Vec::new();
             file.read_to_end(&mut file_chunk).await
@@ -120,6 +134,7 @@ async fn create_file_entry(raw_entry: DirEntry, file_meta: FileMeta) -> Result<(
         _ => None,
     };
     let file_entry = FileEntry::new(file_meta, file_chunk);
+    tx.send(file_entry).await.map_err(AppError::TokioSendError)?;
 
     Ok(())
 }
