@@ -2,7 +2,7 @@
 
 ## Get Started
 
-## Project Structure
+## Limitations
 
 ## Assumptions
 
@@ -30,6 +30,18 @@ Besides, I also made some other assumptions for the implementation.
   So there's no point to sync it.
 
 ## Design Decision
+
+### Send big files
+
+### PID file in receiver's directory
+
+### Symbolic links
+
+## Architecture
+
+### Project Structure
+
+### Workflow
 
 ## Improvement
 - Add command line argument to control

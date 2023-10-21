@@ -23,6 +23,12 @@ pub enum AppError {
     /// Directory is in use
     #[error("Directory {0} is in use by other receiver")]
     DirInUse(String),
+    /// Empty payload
+    #[error("Empty payload")]
+    EmptyPayload,
+    /// File not exist
+    #[error("File not exist: {0}")]
+    FileNotExist(String),
 
     // ----------------------std io error----------------------
     /// Failed to create directory
@@ -71,7 +77,7 @@ pub enum AppError {
     TokioJoinError(#[from] tokio::task::JoinError),
     /// Tokio send error
     #[error("Tokio send error: {0}")]
-    TokioSendError(#[from] mpsc::error::SendError<FileEntry>),
+    TokioSendError(#[from] mpsc::error::SendError<tungstenite::Message>),
 
     /// Serde_json error
     #[error("Serde_json error: {0}")]

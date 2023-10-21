@@ -2,10 +2,12 @@ use std::net::SocketAddr;
 use log::{debug, error, info, warn};
 use tokio::fs;
 use tokio::net::{TcpListener, TcpStream};
-use ws_common::{Result, AppError, WsRequest, FileEntry, WsResponse};
+use ws_common::{Result, AppError, WsRequest, FileEntry, WsResponse, FileMeta};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use futures::{SinkExt, StreamExt};
+use futures::future::err;
+use tokio::fs::OpenOptions;
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite;
@@ -106,7 +108,7 @@ async fn handle_connection(output_dir: String, peer: Arc<Mutex<Option<SocketAddr
     let ws_stream = tokio_tungstenite::accept_async(stream).await?;
     let (mut outgoing, mut incoming) = ws_stream.split();
     // create channel to collect file entry from tasks
-    let (tx, mut rx) = mpsc::channel::<tungstenite::Message>(CHANNEL_CAPACITY);
+    let (tx, mut rx) = mpsc::channel::<Message>(CHANNEL_CAPACITY);
 
     // FIXME: not compile
     // let mut lock = peer.try_lock();
@@ -122,10 +124,10 @@ async fn handle_connection(output_dir: String, peer: Arc<Mutex<Option<SocketAddr
     //     return Ok(());
     // }
 
-    // spawn a task to collect write file message and send them to sender
+    // spawn a task to collect message and send back to `sender`
     tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
-            info!("[Receiver] send ws response: {:?}", msg);
+            debug!("[Receiver] send ws response: {:?}", msg);
             if let Err(err) = outgoing.send(msg).await {
                 error!("[Receiver] failed to send ws response: {}", err);
             }
@@ -144,8 +146,31 @@ async fn handle_connection(output_dir: String, peer: Arc<Mutex<Option<SocketAddr
                         }
                         let ws_req = ws_req.unwrap();
                         match ws_req {
+                            WsRequest::CreateFile(file_meta) => {
+                                debug!("[Receiver] got create file message: {:?}", file_meta);
+                                let tx = tx.clone();
+                                let out = output_dir.clone();
+                                tokio::spawn(async move {
+                                    let resp = match create_file(out, file_meta.clone()).await {
+                                        Ok(_) => {
+                                            WsResponse::new_create_success_message(file_meta)
+                                        }
+                                        Err(err) => {
+                                            error!("[Receiver] create file error: {:?}", err);
+                                            WsResponse::new_create_failed_message(file_meta)
+                                        }
+                                    };
+                                    if let Err(err) = resp {
+                                        error!("[Receiver] failed to create ws response: {:?}", err);
+                                        return;
+                                    }
+                                    if let Err(err) = tx.send(resp.unwrap()).await {
+                                        error!("[Receiver] failed to send ws response: {}", err);
+                                    }
+                                });
+                            }
                             WsRequest::WriteFile(file_entry) => {
-                                info!("received write file message: {:?}", file_entry);
+                                debug!("[Receiver] got write file message: {:?}", file_entry);
                                 let tx = tx.clone();
                                 let out = output_dir.clone();
                                 tokio::spawn(async move {
@@ -167,9 +192,9 @@ async fn handle_connection(output_dir: String, peer: Arc<Mutex<Option<SocketAddr
                                         error!("[Receiver] failed to send ws response: {}", err);
                                     }
                                 });
-                            },
+                            }
                             WsRequest::ClearDir(_) => {
-                                info!("[Receiver] received clear dir message");
+                                info!("[Receiver] got clear dir message");
                                 // accept new connection, clear local dir, send response
                                 if let Err(err) = clear_dir(output_dir.clone()).await {
                                     error!("[Receiver] failed to clear dir: {:?}", err);
@@ -185,10 +210,10 @@ async fn handle_connection(output_dir: String, peer: Arc<Mutex<Option<SocketAddr
                                 }
                             }
                         }
-                    },
+                    }
                     _ => {}
                 }
-            },
+            }
             Err(err) => {
                 error!("[Receiver] read message error: {}", err);
             }
@@ -217,31 +242,57 @@ async fn clear_dir(output_dir: String) -> Result<()> {
     Ok(())
 }
 
-/// Write file to local
-async fn write_file(output_dir: String, file_entry: FileEntry) -> Result<()> {
-    let recv_path = Path::new(&output_dir).join(&file_entry.rel_path());
-    if !recv_path.exists() {
-        if file_entry.is_dir() {
-            fs::create_dir_all(recv_path).await.map_err(AppError::FailedCreateDir)?;
-            return Ok(());
+/// Create file or directory, if it's a file, create with size info from `file_meta`
+async fn create_file(output_dir: String, file_meta: FileMeta) -> Result<()> {
+    let target_path = Path::new(&output_dir).join(&file_meta.rel_path());
+    if file_meta.is_dir() {
+        if !target_path.exists() {
+            fs::create_dir_all(target_path).await.map_err(AppError::FailedCreateDir)?;
         }
-
-        // file_entry is file, write to local
-        // file_path can not be root, so unwrap is safe
-        let parent_dir = recv_path.parent().unwrap();
+        return Ok(());
+    }
+    // file_meta is file, create file with size
+    if !target_path.exists() {
+        let parent_dir = target_path.parent().unwrap();
         if !parent_dir.exists() {
             fs::create_dir_all(parent_dir).await.map_err(AppError::FailedCreateDir)?;
         }
-
-        // create file
-        let mut file = fs::File::create(&recv_path).await.map_err(AppError::FailedCreateFile)?;
-
-        // seek to offset, then write
-        file.seek(std::io::SeekFrom::Start(file_entry.file_offset().unwrap_or(0))).await.map_err(AppError::FailedSeekFile)?;
-        file.write_all(file_entry.file_content().unwrap_or(&[])).await.map_err(AppError::FailedWriteFile)?;
-    } else {
-        // TODO
     }
+    // create & truncate file
+    fs::File::create(&target_path).await.map_err(AppError::FailedCreateFile)?;
+
+    Ok(())
+}
+
+/// Write file content to local
+async fn write_file(output_dir: String, file_entry: FileEntry) -> Result<()> {
+    if !file_entry.is_file() {
+        return Ok(());
+    }
+    if file_entry.file_content().is_none() {
+        error!("[Receiver] file content is empty, shouldn't happen: {:?}", file_entry);
+        return Err(AppError::EmptyPayload);
+    }
+
+    let target_path = Path::new(&output_dir).join(&file_entry.rel_path());
+    if !target_path.exists() {
+        error!("[Receiver] file not exists, shouldn't happen: {:?}", target_path);
+        return Err(AppError::FileNotExist(target_path.to_str().unwrap_or("").to_string()));
+    }
+    if !target_path.is_file() {
+        error!("[Receiver] target path is not file, shouldn't happen: {:?}", target_path);
+        return Err(AppError::FileNotExist(target_path.to_str().unwrap_or("").to_string()));
+    }
+
+    error!("file_size = {}, offset = {:?}, chunk_size = {:?}",
+        file_entry.file_meta().file_size(),
+        file_entry.file_offset(),
+        file_entry.file_content().map(|f| f.len()));
+
+    let mut file = OpenOptions::new()
+        .append(true)
+        .open(&target_path).await.map_err(AppError::FailedOpenFile)?;
+    file.write(file_entry.file_content().unwrap_or(&[])).await.map_err(AppError::FailedWriteFile)?;
 
     Ok(())
 }

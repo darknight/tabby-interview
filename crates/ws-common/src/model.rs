@@ -17,6 +17,7 @@ pub enum EntryType {
 pub struct FileMeta {
     rel_path: String,
     entry_type: EntryType,
+    file_size: u64,
 }
 
 impl Eq for FileMeta {}
@@ -41,8 +42,8 @@ impl Ord for FileMeta {
 
 impl FileMeta {
     /// Create file meta
-    pub fn new(rel_path: String, entry_type: EntryType) -> Self {
-        Self { rel_path, entry_type }
+    pub fn new(rel_path: String, entry_type: EntryType, file_size: u64) -> Self {
+        Self { rel_path, entry_type, file_size }
     }
 
     /// Get relative path info
@@ -50,9 +51,24 @@ impl FileMeta {
         &self.rel_path
     }
 
-    /// Get entry type info
-    pub fn entry_type(&self) -> &EntryType {
-        &self.entry_type
+    /// Return true if current file meta is a file
+    pub fn is_file(&self) -> bool {
+        self.entry_type == EntryType::File
+    }
+
+    /// Return true if current file meta is a directory
+    pub fn is_dir(&self) -> bool {
+        self.entry_type == EntryType::Dir
+    }
+
+    /// Return true if current file meta is a symbolic link
+    pub fn is_sym_link(&self) -> bool {
+        self.entry_type == EntryType::SymLink
+    }
+
+    /// Get file size info
+    pub fn file_size(&self) -> u64 {
+        self.file_size
     }
 }
 
@@ -93,6 +109,8 @@ impl Debug for FileEntry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FileEntry")
             .field("file_meta", &self.file_meta)
+            .field("file_chunk_offset", &self.file_chunk
+                .as_ref().map_or(0, |chunk| chunk.offset))
             .field("file_chunk_size", &self.file_chunk
                 .as_ref().map_or(0, |chunk| chunk.payload.len()))
             .finish()
@@ -122,12 +140,17 @@ impl FileEntry {
 
     /// Return true if current file entry is a file
     pub fn is_file(&self) -> bool {
-        self.file_meta.entry_type == EntryType::File
+        self.file_meta.is_file()
     }
 
     /// Return true if current file entry is a directory
     pub fn is_dir(&self) -> bool {
-        self.file_meta.entry_type == EntryType::Dir
+        self.file_meta.is_dir()
+    }
+
+    /// Return true if current file entry is a symbolic link
+    pub fn is_sym_link(&self) -> bool {
+        self.file_meta.is_sym_link()
     }
 
     /// Get file meta info
@@ -139,6 +162,8 @@ impl FileEntry {
 /// Communication protocol between sender and receiver
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum WsRequest {
+    /// Create file request
+    CreateFile(FileMeta),
     /// Write file request, by saying file here it refers to either file or directory
     WriteFile(FileEntry),
     /// File meta list of sender's local dir
@@ -149,6 +174,13 @@ pub enum WsRequest {
 }
 
 impl WsRequest {
+    /// Create CreateFile message
+    pub fn new_create_file_message(file_meta: FileMeta) -> Result<tungstenite::Message> {
+        let ws_req = WsRequest::CreateFile(file_meta);
+        let message = tungstenite::Message::Text(serde_json::to_string(&ws_req)?);
+        Ok(message)
+    }
+
     /// Create WriteFile message
     pub fn new_write_file_message(file_entry: FileEntry) -> Result<tungstenite::Message> {
         let ws_req = WsRequest::WriteFile(file_entry);
@@ -167,6 +199,10 @@ impl WsRequest {
 /// Communication protocol between sender and receiver
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum WsResponse {
+    /// Create file success response
+    CreateSuccess(FileMeta),
+    /// Create file failure response
+    CreateFailed(FileMeta),
     /// Write file success response
     WriteSuccess(FileMeta),
     /// Write file failure response
@@ -184,6 +220,20 @@ pub enum WsResponse {
 }
 
 impl WsResponse {
+    /// Create CreateSuccess message
+    pub fn new_create_success_message(file_meta: FileMeta) -> Result<tungstenite::Message> {
+        let ws_resp = WsResponse::CreateSuccess(file_meta);
+        let message = tungstenite::Message::Text(serde_json::to_string(&ws_resp)?);
+        Ok(message)
+    }
+
+    /// Create CreateFailed message
+    pub fn new_create_failed_message(file_meta: FileMeta) -> Result<tungstenite::Message> {
+        let ws_resp = WsResponse::CreateFailed(file_meta);
+        let message = tungstenite::Message::Text(serde_json::to_string(&ws_resp)?);
+        Ok(message)
+    }
+
     /// Create WriteSuccess message
     pub fn new_write_success_message(file_meta: FileMeta) -> Result<tungstenite::Message> {
         let ws_resp = WsResponse::WriteSuccess(file_meta);

@@ -1,14 +1,15 @@
 use std::path::Path;
 use futures::{SinkExt, StreamExt};
 use log::{debug, error, info, warn};
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::Sender;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, tungstenite, WebSocketStream};
+use tokio_tungstenite::tungstenite::Message;
 use ws_common::{Result, AppError, EntryType, FileMeta, FileChunk, FileEntry, WsRequest, WsResponse, walk_dir};
 use walkdir::DirEntry;
-use crate::CHANNEL_CAPACITY;
+use crate::{CHANNEL_CAPACITY, FILE_CHUNK_SIZE};
 
 /// Websocket sender
 #[derive(Debug, Clone)]
@@ -63,30 +64,23 @@ impl WsStream {
         let (mut outgoing, mut incoming) = self.ws_stream.split();
 
         // create channel to collect file entry from tasks
-        let (tx, mut rx) = mpsc::channel::<FileEntry>(CHANNEL_CAPACITY);
+        let (tx, mut rx) = mpsc::channel::<Message>(CHANNEL_CAPACITY);
 
         // spawn blocking task to walk directory
         let meta_infos = tokio::task::spawn_blocking(move || {
             walk_dir(from_dir, false)
         }).await?;
 
-        let file_metas = meta_infos.iter().map(|meta| meta.0.clone()).collect::<Vec<FileMeta>>();
+        let file_metas = meta_infos.keys().cloned().collect::<Vec<FileMeta>>();
         let message = WsRequest::new_clear_dir_message(file_metas)?;
         outgoing.send(message).await?;
 
         // spawn a task to accept file entry from channel and send them to receiver
         tokio::spawn(async move {
-            while let Some(file_entry) = rx.recv().await {
-                info!("[Sender] send file entry: {:?}", file_entry);
-                match WsRequest::new_write_file_message(file_entry) {
-                    Ok(message) => {
-                        if let Err(err) = outgoing.send(message).await {
-                            error!("[Sender] failed to send file entry: {}", err);
-                        }
-                    }
-                    Err(err) => {
-                        error!("[Sender] failed to create ws message {:?}", err);
-                    }
+            while let Some(msg) = rx.recv().await {
+                debug!("[Sender] send ws request: {:?}", msg);
+                if let Err(err) = outgoing.send(msg).await {
+                    error!("[Sender] failed to send ws request: {}", err);
                 }
             }
         });
@@ -96,7 +90,7 @@ impl WsStream {
             match raw {
                 Ok(msg) => {
                     match msg {
-                        tungstenite::Message::Text(text) => {
+                        Message::Text(text) => {
                             let ws_resp = serde_json::from_str::<WsResponse>(&text);
                             if ws_resp.is_err() {
                                 error!("[Sender] failed to parse ws response: {}", text);
@@ -104,20 +98,38 @@ impl WsStream {
                             }
                             let ws_resp = ws_resp.unwrap();
                             match ws_resp {
+                                WsResponse::CreateSuccess(file_meta) => {
+                                    info!("[Sender] create file done: {:?}", file_meta);
+                                    if file_meta.is_file() {
+                                        if let Some(dir_entry) = meta_infos.get(&file_meta) {
+                                            let tx = tx.clone();
+                                            let dir_entry = dir_entry.clone();
+                                            tokio::spawn(async move {
+                                                if let Err(err) = send_write_file_message(tx, file_meta, dir_entry.clone()).await {
+                                                    error!("[Sender] create file entry: {}", err);
+                                                }
+                                            });
+                                        }
+                                    }
+                                }
+                                WsResponse::CreateFailed(file_meta) => {
+                                    error!("[Sender] create file failed: {:?}", file_meta);
+                                }
                                 WsResponse::WriteSuccess(file_meta) => {
                                     info!("[Sender] receiver write done: {:?}", file_meta);
                                 }
                                 WsResponse::WriteFailed(file_meta) => {
                                     error!("[Sender] receiver write failed: {:?}", file_meta);
+                                    // TODO: retry?
                                 }
                                 WsResponse::ClearDirDone(_) => {
                                     info!("[Sender] receiver dir is ready");
-                                    // spawn task to create file entry
-                                    meta_infos.clone().into_iter().for_each(|(file_meta, dir_entry)| {
+                                    // spawn task to send create file message
+                                    meta_infos.clone().into_iter().for_each(|(file_meta, _)| {
                                         let tx = tx.clone();
                                         tokio::spawn(async move {
-                                            if let Err(err) = create_file_entry(tx, dir_entry, file_meta).await {
-                                                error!("[Sender] failed to create file entry: {:?}", err);
+                                            if let Err(err) = send_create_file_message(tx, file_meta).await {
+                                                error!("[Sender] send create file message: {}", err);
                                             }
                                         });
                                     });
@@ -137,20 +149,38 @@ impl WsStream {
     }
 }
 
-async fn create_file_entry(tx: Sender<FileEntry>, dir_entry: DirEntry, file_meta: FileMeta) -> Result<()> {
-    let file_chunk = match file_meta.entry_type() {
-        EntryType::File => {
-            let mut file = tokio::fs::File::open(dir_entry.path()).await
-                .map_err(AppError::FailedOpenFile)?;
-            let mut file_chunk = Vec::new();
-            file.read_to_end(&mut file_chunk).await
-                .map_err(AppError::FailedReadFile)?;
-            Some(FileChunk::new(0, file_chunk))
+/// Compose `CreateFile` message and send it to channel
+async fn send_create_file_message(tx: Sender<Message>, file_meta: FileMeta) -> Result<()> {
+    let message = WsRequest::new_create_file_message(file_meta)?;
+    tx.send(message).await.map_err(AppError::TokioSendError)?;
+
+    Ok(())
+}
+
+/// Compose `WriteFile` message and send it to channel
+async fn send_write_file_message(tx: Sender<Message>, file_meta: FileMeta, dir_entry: DirEntry) -> Result<()> {
+    if !file_meta.is_file() {
+        return Ok(());
+    }
+
+    let mut file = tokio::fs::File::open(dir_entry.path()).await
+        .map_err(AppError::FailedOpenFile)?;
+    let mut buf = vec![0; FILE_CHUNK_SIZE];
+    let mut offset = 0u64;
+
+    // read file into buffer and send file entry to channel
+    while let Ok(n) = file.read(&mut buf).await {
+        if n == 0 {
+            break;
         }
-        _ => None,
-    };
-    let file_entry = FileEntry::new(file_meta, file_chunk);
-    tx.send(file_entry).await.map_err(AppError::TokioSendError)?;
+        let actual_payload = buf[..n].to_vec();
+        let file_chunk = FileChunk::new(offset, actual_payload);
+        let file_entry = FileEntry::new(file_meta.clone(), Some(file_chunk));
+        let message = WsRequest::new_write_file_message(file_entry)?;
+        tx.send(message).await.map_err(AppError::TokioSendError)?;
+        // next offset
+        offset += n as u64;
+    }
 
     Ok(())
 }
