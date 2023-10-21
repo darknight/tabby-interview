@@ -1,7 +1,6 @@
 use thiserror::Error;
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite;
-use crate::FileEntry;
 
 pub type Result<T> = std::result::Result<T, AppError>;
 
@@ -12,8 +11,8 @@ pub enum AppError {
     #[error("Invalid command line arguments: {0}")]
     InvalidArgs(String),
     /// Invalid port number
-    #[error("Invalid port number: {0}")]
-    InvalidPort(u16),
+    #[error("System reserved port: {0}")]
+    SystemReservedPort(u16),
     /// Port in use
     #[error("Port {0} is already in use")]
     PortInUse(u16),

@@ -34,7 +34,7 @@ async fn main() -> Result<()> {
         Args { port: Some(port), output_dir: Some(output_dir), from: None, to: None } => {
             // create receiver
             let mut receiver = ws_receiver::WsReceiver::new(port, output_dir).await?;
-            receiver.run().await?;
+            receiver.run().await;
             Ok(())
         },
         Args { port: None, output_dir: None, from: Some(from_dir), to: Some(ws_addr) } => {

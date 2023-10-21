@@ -2,8 +2,6 @@
 
 ## Get Started
 
-## Limitations
-
 ## Assumptions
 
 Based on the minimum requirements described in the question, I made two assumptions for each of them.
@@ -43,7 +41,10 @@ Besides, I also made some other assumptions for the implementation.
 
 ### Workflow
 
-## Improvement
+## Limitations & Improvement
+
+### Write done notification
+
 - Add command line argument to control
   - log level, log output file
   - if overwrite or skip same files

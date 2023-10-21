@@ -5,9 +5,9 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::Sender;
-use tokio_tungstenite::{connect_async, MaybeTlsStream, tungstenite, WebSocketStream};
+use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use tokio_tungstenite::tungstenite::Message;
-use ws_common::{Result, AppError, EntryType, FileMeta, FileChunk, FileEntry, WsRequest, WsResponse, walk_dir};
+use ws_common::{Result, AppError, FileMeta, FileChunk, FileEntry, WsRequest, WsResponse, walk_dir};
 use walkdir::DirEntry;
 use crate::{CHANNEL_CAPACITY, FILE_CHUNK_SIZE};
 
@@ -78,7 +78,7 @@ impl WsStream {
         // spawn a task to accept file entry from channel and send them to receiver
         tokio::spawn(async move {
             while let Some(msg) = rx.recv().await {
-                debug!("[Sender] send ws request: {:?}", msg);
+                debug!("[Sender] send ws request");
                 if let Err(err) = outgoing.send(msg).await {
                     error!("[Sender] failed to send ws request: {}", err);
                 }

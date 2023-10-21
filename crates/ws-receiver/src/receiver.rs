@@ -1,16 +1,14 @@
 use std::net::SocketAddr;
-use log::{debug, error, info, warn};
+use log::{debug, error, info};
 use tokio::fs;
 use tokio::net::{TcpListener, TcpStream};
 use ws_common::{Result, AppError, WsRequest, FileEntry, WsResponse, FileMeta};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use futures::{SinkExt, StreamExt};
-use futures::future::err;
 use tokio::fs::OpenOptions;
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::mpsc;
-use tokio_tungstenite::tungstenite;
 use tokio_tungstenite::tungstenite::Message;
 use crate::{ADDR, CHANNEL_CAPACITY, PID_FILE};
 
@@ -31,8 +29,8 @@ impl WsReceiver {
     /// After the check, we'll try to bind to `ADDR:port` and start listening.
     pub async fn new(port: u16, output_dir: String) -> Result<WsReceiver> {
         // check port
-        if port < 1024 || port > 65535 {
-            return Err(AppError::InvalidPort(port));
+        if port < 1024 {
+            return Err(AppError::SystemReservedPort(port));
         }
 
         // check output_dir
@@ -77,14 +75,18 @@ impl WsReceiver {
     /// NOTE:
     /// Alternatively, we can use a queue to hold all incoming connections, but this will
     /// waste receiver resources and gain nothing, since syncing directory is more like 1:1 mapping
-    pub async fn run(&mut self) -> Result<()> {
+    pub async fn run(&mut self) {
         let peer: Arc<Mutex<Option<SocketAddr>>> = Arc::new(Mutex::new(None));
         while let Ok((stream, addr)) = self.listener.accept().await {
             info!("[Receiver] New connection from: {}", addr);
             let out = self.output_dir.clone();
-            tokio::spawn(handle_connection(out, peer.clone(), stream, addr));
+            let peer = peer.clone();
+            tokio::spawn(async move {
+                if let Err(err) = handle_connection(out, peer.clone(), stream, addr).await {
+                    error!("[Receiver] handle connection error: {:?}", err);
+                }
+            });
         }
-        Ok(())
     }
 
     /// Stop listening for incoming connections
@@ -283,11 +285,6 @@ async fn write_file(output_dir: String, file_entry: FileEntry) -> Result<()> {
         error!("[Receiver] target path is not file, shouldn't happen: {:?}", target_path);
         return Err(AppError::FileNotExist(target_path.to_str().unwrap_or("").to_string()));
     }
-
-    error!("file_size = {}, offset = {:?}, chunk_size = {:?}",
-        file_entry.file_meta().file_size(),
-        file_entry.file_offset(),
-        file_entry.file_content().map(|f| f.len()));
 
     let mut file = OpenOptions::new()
         .append(true)
