@@ -62,7 +62,7 @@ impl WsStream {
     /// Sync directory via websocket stream
     pub async fn sync_dir(self) -> Result<()> {
         let from_dir = self.from_dir.clone();
-        info!("[Sender] from directory: {}", from_dir);
+        info!("[Sender] base directory: {}", from_dir);
         let (mut outgoing, mut incoming) = self.ws_stream.split();
 
         // create channel to collect file entry from tasks
@@ -74,17 +74,17 @@ impl WsStream {
         }).await?;
 
         let file_metas = meta_infos.iter().map(|meta| meta.0.clone()).collect::<Vec<FileMeta>>();
-        let message = WsRequest::new_list_dir_message(file_metas)?;
+        let message = WsRequest::new_clear_dir_message(file_metas)?;
         outgoing.send(message).await?;
 
         // spawn a task to accept file entry from channel and send them to receiver
         tokio::spawn(async move {
             while let Some(file_entry) = rx.recv().await {
-                info!("[Sender] prepare to send file entry: {:?}", file_entry);
+                info!("[Sender] send file entry: {:?}", file_entry);
                 match WsRequest::new_write_file_message(file_entry) {
                     Ok(message) => {
                         if let Err(err) = outgoing.send(message).await {
-                            error!("[Sender] failed to send ws message: {}", err);
+                            error!("[Sender] failed to send file entry: {}", err);
                         }
                     }
                     Err(err) => {
@@ -102,23 +102,27 @@ impl WsStream {
                         tungstenite::Message::Text(text) => {
                             let ws_resp = serde_json::from_str::<WsResponse>(&text);
                             if ws_resp.is_err() {
-                                error!("[Sender] failed to parse message: {}", text);
+                                error!("[Sender] failed to parse ws response: {}", text);
                                 continue;
                             }
                             let ws_resp = ws_resp.unwrap();
-                            debug!("[Sender] received message: {:?}", ws_resp);
                             match ws_resp {
                                 WsResponse::WriteSuccess(file_meta) => {
-                                    debug!("[Sender] successfully write file on receiver side: {:?}", file_meta);
+                                    info!("[Sender] receiver write done: {:?}", file_meta);
                                 }
                                 WsResponse::WriteFailed(file_meta) => {
-                                    error!("[Sender] failed to write file on receiver side: {:?}", file_meta);
+                                    error!("[Sender] receiver write failed: {:?}", file_meta);
                                 }
-                                WsResponse::DeleteDone(failed) => {
-                                    // skip failed files, do not send them
-                                    let failed_set = failed.iter().map(|meta| meta.rel_path().to_string()).collect::<BTreeSet<String>>();
-                                    meta_infos.clone().into_iter().filter(|meta| !failed_set.contains(meta.0.rel_path())).for_each(|meta| {
-                                        tokio::spawn(create_file_entry(tx.clone(), meta.1, meta.0));
+                                WsResponse::ClearDirDone(_) => {
+                                    info!("[Sender] receiver dir is ready");
+                                    // spawn task to create file entry
+                                    meta_infos.clone().into_iter().for_each(|(file_meta, dir_entry)| {
+                                        let tx = tx.clone();
+                                        tokio::spawn(async move {
+                                            if let Err(err) = create_file_entry(tx, dir_entry, file_meta).await {
+                                                error!("[Sender] failed to create file entry: {:?}", err);
+                                            }
+                                        });
                                     });
                                 }
                             }

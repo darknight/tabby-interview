@@ -109,6 +109,8 @@ impl WsReceiver {
 async fn handle_connection(output_dir: String, peer: Arc<Mutex<Option<SocketAddr>>>, stream: TcpStream, addr: SocketAddr) -> Result<()> {
     let ws_stream = tokio_tungstenite::accept_async(stream).await?;
     let (mut outgoing, mut incoming) = ws_stream.split();
+    // create channel to collect file entry from tasks
+    let (tx, mut rx) = mpsc::channel::<tungstenite::Message>(CHANNEL_CAPACITY);
 
     // FIXME: not compile
     // let mut lock = peer.try_lock();
@@ -124,18 +126,12 @@ async fn handle_connection(output_dir: String, peer: Arc<Mutex<Option<SocketAddr
     //     return Ok(());
     // }
 
-    // accept new connection, clear local dir first
-    clear_dir(output_dir.clone()).await?;
-
-    // create channel to collect file entry from tasks
-    let (tx, mut rx) = mpsc::channel::<tungstenite::Message>(CHANNEL_CAPACITY);
-
     // spawn a task to collect write file message and send them to sender
     tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
-            info!("[Receiver] prepare to send ws message: {:?}", msg);
+            info!("[Receiver] send ws response: {:?}", msg);
             if let Err(err) = outgoing.send(msg).await {
-                error!("[Receiver] failed to send ws message: {}", err);
+                error!("[Receiver] failed to send ws response: {}", err);
             }
         }
     });
@@ -151,9 +147,9 @@ async fn handle_connection(output_dir: String, peer: Arc<Mutex<Option<SocketAddr
                             continue;
                         }
                         let ws_req = ws_req.unwrap();
-                        debug!("[Receiver] received message: {:?}", ws_req);
                         match ws_req {
                             WsRequest::WriteFile(file_entry) => {
+                                info!("received write file message: {:?}", file_entry);
                                 let tx = tx.clone();
                                 let out = output_dir.clone();
                                 tokio::spawn(async move {
@@ -176,8 +172,21 @@ async fn handle_connection(output_dir: String, peer: Arc<Mutex<Option<SocketAddr
                                     }
                                 });
                             },
-                            WsRequest::ListDir(file_metas) => {
-                                warn!("[Receiver] received list dir message, ignore...");
+                            WsRequest::ClearDir(_) => {
+                                info!("[Receiver] received clear dir message");
+                                // accept new connection, clear local dir, send response
+                                if let Err(err) = clear_dir(output_dir.clone()).await {
+                                    error!("[Receiver] failed to clear dir: {:?}", err);
+                                    // TODO: retry?
+                                }
+                                let resp = WsResponse::new_clear_dir_done_message(vec![]);
+                                if let Err(err) = resp {
+                                    error!("[Receiver] failed to create ws response: {:?}", err);
+                                    continue;
+                                }
+                                if let Err(err) = tx.send(resp.unwrap()).await {
+                                    error!("[Receiver] failed to send ws response: {}", err);
+                                }
                             }
                         }
                     },

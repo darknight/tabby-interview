@@ -19,3 +19,4 @@ Cargo.lock
 /target
 .idea/
 recv_dir/
+send_dir/

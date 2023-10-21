@@ -124,23 +124,26 @@ impl FileEntry {
 /// Communication protocol between sender and receiver
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum WsRequest {
-    /// Write file request, meta info + file chunk
+    /// Write file request, by saying file here it refers to either file or directory
     WriteFile(FileEntry),
-    /// File meta list from sender, receiver will delete local files that are not in this list
-    ListDir(Vec<FileMeta>),
+    /// File meta list of sender's local dir
+    ///
+    /// Receiver can use this list as filter to decide which files and directories need
+    /// to be removed.
+    ClearDir(Vec<FileMeta>),
 }
 
 impl WsRequest {
-    /// Create write file message
+    /// Create WriteFile message
     pub fn new_write_file_message(file_entry: FileEntry) -> Result<tungstenite::Message> {
         let ws_req = WsRequest::WriteFile(file_entry);
         let message = tungstenite::Message::Text(serde_json::to_string(&ws_req)?);
         Ok(message)
     }
 
-    /// Create list dir message
-    pub fn new_list_dir_message(file_metas: Vec<FileMeta>) -> Result<tungstenite::Message> {
-        let ws_req = WsRequest::ListDir(file_metas);
+    /// Create ClearDir message
+    pub fn new_clear_dir_message(file_metas: Vec<FileMeta>) -> Result<tungstenite::Message> {
+        let ws_req = WsRequest::ClearDir(file_metas);
         let message = tungstenite::Message::Text(serde_json::to_string(&ws_req)?);
         Ok(message)
     }
@@ -153,23 +156,36 @@ pub enum WsResponse {
     WriteSuccess(FileMeta),
     /// Write file failure response
     WriteFailed(FileMeta),
-    /// Delete file response, Vec<FileMeta> is the list of files that failed to delete
-    /// due to some reason (e.g. permission), sender will skip these files or directories during syncing
-    /// On success, Vec<FileMeta> is empty
-    DeleteDone(Vec<FileMeta>)
+    /// This is the response to notify sender that receiver is ready to accept files
+    /// The file meta list filed contains files which are kept on receiver side
+    /// It may happen due to many reasons, such as
+    /// 1. permission denied
+    /// 2. file is being used by other process
+    /// 3. file is the same as sender's
+    ///
+    /// This is a extension design, currently we don't use it
+    /// It can be used as a filter to avoid sending unnecessary files, which can improve performance
+    ClearDirDone(Vec<FileMeta>)
 }
 
 impl WsResponse {
-    /// Create write success message
+    /// Create WriteSuccess message
     pub fn new_write_success_message(file_meta: FileMeta) -> Result<tungstenite::Message> {
         let ws_resp = WsResponse::WriteSuccess(file_meta);
         let message = tungstenite::Message::Text(serde_json::to_string(&ws_resp)?);
         Ok(message)
     }
 
-    /// Create write failed message
+    /// Create WriteFailed message
     pub fn new_write_failed_message(file_meta: FileMeta) -> Result<tungstenite::Message> {
         let ws_resp = WsResponse::WriteFailed(file_meta);
+        let message = tungstenite::Message::Text(serde_json::to_string(&ws_resp)?);
+        Ok(message)
+    }
+
+    /// Create ClearDirDone message
+    pub fn new_clear_dir_done_message(file_metas: Vec<FileMeta>) -> Result<tungstenite::Message> {
+        let ws_resp = WsResponse::ClearDirDone(file_metas);
         let message = tungstenite::Message::Text(serde_json::to_string(&ws_resp)?);
         Ok(message)
     }
