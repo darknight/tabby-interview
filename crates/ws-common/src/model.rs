@@ -12,6 +12,7 @@ pub enum EntryType {
     SymLink,
 }
 
+/// File meta info
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileMeta {
     rel_path: String,
@@ -39,14 +40,17 @@ impl Ord for FileMeta {
 }
 
 impl FileMeta {
+    /// Create file meta
     pub fn new(rel_path: String, entry_type: EntryType) -> Self {
         Self { rel_path, entry_type }
     }
 
+    /// Get relative path info
     pub fn rel_path(&self) -> &str {
         &self.rel_path
     }
 
+    /// Get entry type info
     pub fn entry_type(&self) -> &EntryType {
         &self.entry_type
     }
@@ -62,19 +66,23 @@ pub struct FileChunk {
 }
 
 impl FileChunk {
+    /// Create file chunk
     pub fn new(offset: u64, payload: Vec<u8>) -> Self {
         Self { offset, payload }
     }
 
+    /// Get file offset info
     pub fn offset(&self) -> u64 {
         self.offset
     }
 
+    /// Get file content
     pub fn payload(&self) -> &[u8] {
         &self.payload
     }
 }
 
+/// File entry is the basic unit of communication between sender and receiver
 #[derive(Clone, Serialize, Deserialize)]
 pub struct FileEntry {
     file_meta: FileMeta,
@@ -92,30 +100,37 @@ impl Debug for FileEntry {
 }
 
 impl FileEntry {
+    /// Create file entry
     pub fn new(file_meta: FileMeta, file_chunk: Option<FileChunk>) -> Self {
         Self { file_meta, file_chunk }
     }
 
+    /// Get file offset info
     pub fn file_offset(&self) -> Option<u64> {
         self.file_chunk.as_ref().map(|c| c.offset)
     }
 
+    /// Get file content
     pub fn file_content(&self) -> Option<&[u8]> {
         self.file_chunk.as_ref().map(|c| c.payload.as_slice())
     }
 
+    /// Get file relative path info
     pub fn rel_path(&self) -> &str {
         &self.file_meta.rel_path
     }
 
+    /// Return true if current file entry is a file
     pub fn is_file(&self) -> bool {
         self.file_meta.entry_type == EntryType::File
     }
 
+    /// Return true if current file entry is a directory
     pub fn is_dir(&self) -> bool {
         self.file_meta.entry_type == EntryType::Dir
     }
 
+    /// Get file meta info
     pub fn file_meta(&self) -> FileMeta {
         self.file_meta.clone()
     }

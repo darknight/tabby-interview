@@ -1,5 +1,3 @@
-use std::io;
-use std::io::Error;
 use clap::Parser;
 use log::debug;
 use ws_common::{Result, AppError};
