@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use futures::{SinkExt, StreamExt};
 use tokio::fs::OpenOptions;
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
 use tokio_tungstenite::tungstenite::Message;
 use crate::{ADDR, CHANNEL_CAPACITY, PID_FILE};
 
@@ -17,6 +17,7 @@ use crate::{ADDR, CHANNEL_CAPACITY, PID_FILE};
 pub struct WsReceiver {
     output_dir: String,
     listener: TcpListener,
+    only_one_sender: Arc<Semaphore>,
 }
 
 impl WsReceiver {
@@ -41,6 +42,7 @@ impl WsReceiver {
             }
             // check if `PID_FILE` file exists
             let pid_file = out_dir.join(PID_FILE);
+            debug!("pid file: {:?}", pid_file);
             if pid_file.exists() {
                 return Err(AppError::DirInUse(output_dir.clone()));
             }
@@ -64,6 +66,7 @@ impl WsReceiver {
         Ok(WsReceiver {
             output_dir,
             listener,
+            only_one_sender: Arc::new(Semaphore::new(1)),
         })
     }
 
@@ -75,28 +78,30 @@ impl WsReceiver {
     /// NOTE:
     /// Alternatively, we can use a queue to hold all incoming connections, but this will
     /// waste receiver resources and gain nothing, since syncing directory is more like 1:1 mapping
-    pub async fn run(&mut self) {
-        let peer: Arc<Mutex<Option<SocketAddr>>> = Arc::new(Mutex::new(None));
-        while let Ok((stream, addr)) = self.listener.accept().await {
-            info!("[Receiver] New connection from: {}", addr);
+    pub async fn run(&mut self) -> Result<()> {
+        info!("[Receiver] Listening for incoming connections");
+
+        loop {
+            let permit = self.only_one_sender.clone().try_acquire_owned().ok();
+            let (stream, addr) = self.listener.accept().await.map_err(AppError::SocketError)?;
+            info!("[Receiver] New connection from: {}, got permit: {}", addr, permit.is_some());
+
             let out = self.output_dir.clone();
-            let peer = peer.clone();
             tokio::spawn(async move {
-                if let Err(err) = handle_connection(out, peer.clone(), stream, addr).await {
+                if let Err(err) = handle_connection(out, stream, permit).await {
                     error!("[Receiver] handle connection error: {:?}", err);
                 }
             });
         }
     }
 
-    /// Stop listening for incoming connections
+    /// Clean up receiver
     ///
-    /// This will also remove `PID_FILE` file
+    /// This will remove `PID_FILE` file
     pub async fn stop(&mut self) -> Result<()> {
-        // TODO: stop listening
-        // FIXME: what if fail here?
-        debug!("[Receiver] Stopped listening");
-
+        debug!("[Receiver] stopping...");
+        // close semaphore
+        self.only_one_sender.close();
         // delete PID_FILE
         let pid_file = Path::new(&self.output_dir).join(PID_FILE);
         fs::remove_file(pid_file).await.map_err(AppError::FailedDeleteFile)?;
@@ -106,25 +111,19 @@ impl WsReceiver {
 }
 
 /// Handle incoming connection
-async fn handle_connection(output_dir: String, peer: Arc<Mutex<Option<SocketAddr>>>, stream: TcpStream, addr: SocketAddr) -> Result<()> {
-    let ws_stream = tokio_tungstenite::accept_async(stream).await?;
+async fn handle_connection(output_dir: String, stream: TcpStream, permit: Option<OwnedSemaphorePermit>) -> Result<()> {
+    let mut ws_stream = tokio_tungstenite::accept_async(stream).await?;
+
+    // send receiver busy message and close stream
+    if permit.is_none() {
+        let resp = WsResponse::new_receiver_busy_message()?;
+        ws_stream.send(resp).await?;
+        return Ok(());
+    }
+
     let (mut outgoing, mut incoming) = ws_stream.split();
     // create channel to collect file entry from tasks
     let (tx, mut rx) = mpsc::channel::<Message>(CHANNEL_CAPACITY);
-
-    // FIXME: not compile
-    // let mut lock = peer.try_lock();
-    // if let Ok(mut mutex) = lock {
-    //     let old = mutex.replace(addr);
-    //     info!("[Receiver] drop old connection: {:?}, keep new connection: {:?}", old, addr);
-    // } else {
-    //     debug!("lock poisoned: {:?}", peer.is_poisoned());
-    //     // TODO: differentiate `Poisoned` and `WouldBlock` error
-    //     // failed to acquire lock, drop current connection
-    //     warn!("[Receiver] already occupied, try to connect later");
-    //     // TODO: send back error message
-    //     return Ok(());
-    // }
 
     // spawn a task to collect message and send back to `sender`
     tokio::spawn(async move {

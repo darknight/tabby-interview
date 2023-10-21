@@ -2,6 +2,7 @@ use std::cmp::Ordering;
 use std::fmt::Debug;
 use serde::{Deserialize, Serialize};
 use tokio_tungstenite::tungstenite;
+use tokio_tungstenite::tungstenite::Message;
 use crate::Result;
 
 /// File entry type
@@ -177,21 +178,21 @@ impl WsRequest {
     /// Create CreateFile message
     pub fn new_create_file_message(file_meta: FileMeta) -> Result<tungstenite::Message> {
         let ws_req = WsRequest::CreateFile(file_meta);
-        let message = tungstenite::Message::Text(serde_json::to_string(&ws_req)?);
+        let message = Message::Text(serde_json::to_string(&ws_req)?);
         Ok(message)
     }
 
     /// Create WriteFile message
     pub fn new_write_file_message(file_entry: FileEntry) -> Result<tungstenite::Message> {
         let ws_req = WsRequest::WriteFile(file_entry);
-        let message = tungstenite::Message::Text(serde_json::to_string(&ws_req)?);
+        let message = Message::Text(serde_json::to_string(&ws_req)?);
         Ok(message)
     }
 
     /// Create ClearDir message
     pub fn new_clear_dir_message(file_metas: Vec<FileMeta>) -> Result<tungstenite::Message> {
         let ws_req = WsRequest::ClearDir(file_metas);
-        let message = tungstenite::Message::Text(serde_json::to_string(&ws_req)?);
+        let message = Message::Text(serde_json::to_string(&ws_req)?);
         Ok(message)
     }
 }
@@ -216,42 +217,51 @@ pub enum WsResponse {
     ///
     /// This is a extension design, currently we don't use it
     /// It can be used as a filter to avoid sending unnecessary files, which can improve performance
-    ClearDirDone(Vec<FileMeta>)
+    ClearDirDone(Vec<FileMeta>),
 }
 
 impl WsResponse {
     /// Create CreateSuccess message
     pub fn new_create_success_message(file_meta: FileMeta) -> Result<tungstenite::Message> {
         let ws_resp = WsResponse::CreateSuccess(file_meta);
-        let message = tungstenite::Message::Text(serde_json::to_string(&ws_resp)?);
+        let message = Message::Text(serde_json::to_string(&ws_resp)?);
         Ok(message)
     }
 
     /// Create CreateFailed message
     pub fn new_create_failed_message(file_meta: FileMeta) -> Result<tungstenite::Message> {
         let ws_resp = WsResponse::CreateFailed(file_meta);
-        let message = tungstenite::Message::Text(serde_json::to_string(&ws_resp)?);
+        let message = Message::Text(serde_json::to_string(&ws_resp)?);
         Ok(message)
     }
 
     /// Create WriteSuccess message
     pub fn new_write_success_message(file_meta: FileMeta) -> Result<tungstenite::Message> {
         let ws_resp = WsResponse::WriteSuccess(file_meta);
-        let message = tungstenite::Message::Text(serde_json::to_string(&ws_resp)?);
+        let message = Message::Text(serde_json::to_string(&ws_resp)?);
         Ok(message)
     }
 
     /// Create WriteFailed message
     pub fn new_write_failed_message(file_meta: FileMeta) -> Result<tungstenite::Message> {
         let ws_resp = WsResponse::WriteFailed(file_meta);
-        let message = tungstenite::Message::Text(serde_json::to_string(&ws_resp)?);
+        let message = Message::Text(serde_json::to_string(&ws_resp)?);
         Ok(message)
     }
 
     /// Create ClearDirDone message
     pub fn new_clear_dir_done_message(file_metas: Vec<FileMeta>) -> Result<tungstenite::Message> {
         let ws_resp = WsResponse::ClearDirDone(file_metas);
-        let message = tungstenite::Message::Text(serde_json::to_string(&ws_resp)?);
+        let message = Message::Text(serde_json::to_string(&ws_resp)?);
+        Ok(message)
+    }
+
+    /// Create ReceiverBusy message
+    pub fn new_receiver_busy_message() -> Result<Message> {
+        let message = Message::Close(Some(tungstenite::protocol::CloseFrame {
+            code: tungstenite::protocol::frame::coding::CloseCode::Abnormal,
+            reason: std::borrow::Cow::Borrowed("receiver is busy"),
+        }));
         Ok(message)
     }
 }

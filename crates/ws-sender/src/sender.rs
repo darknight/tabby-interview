@@ -71,9 +71,10 @@ impl WsStream {
             walk_dir(from_dir, false)
         }).await?;
 
-        let file_metas = meta_infos.keys().cloned().collect::<Vec<FileMeta>>();
-        let message = WsRequest::new_clear_dir_message(file_metas)?;
-        outgoing.send(message).await?;
+        // FIXME: send clear dir message in separate task
+        // let file_metas = meta_infos.keys().cloned().collect::<Vec<FileMeta>>();
+        // let message = WsRequest::new_clear_dir_message(file_metas)?;
+        // outgoing.send(message).await?;
 
         // spawn a task to accept file entry from channel and send them to receiver
         tokio::spawn(async move {
@@ -133,10 +134,14 @@ impl WsStream {
                                             }
                                         });
                                     });
-                                }
+                                },
                             }
-                        }
-                        _ => {}
+                        },
+                        Message::Close(_) => {
+                            warn!("[Sender] connection is closed by receiver");
+                            return Ok(());
+                        },
+                        _ => {},
                     }
                 }
                 Err(err) => {

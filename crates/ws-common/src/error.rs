@@ -30,6 +30,9 @@ pub enum AppError {
     FileNotExist(String),
 
     // ----------------------std io error----------------------
+    /// Socket error
+    #[error("Socket error: {0}")]
+    SocketError(std::io::Error),
     /// Failed to create directory
     #[error("Failed to create directory: {0}")]
     FailedCreateDir(std::io::Error),
@@ -77,6 +80,9 @@ pub enum AppError {
     /// Tokio send error
     #[error("Tokio send error: {0}")]
     TokioSendError(#[from] mpsc::error::SendError<tungstenite::Message>),
+    /// Semaphore acquire error
+    #[error("Semaphore acquire error: {0}")]
+    SemaphoreAcquireError(#[from] tokio::sync::AcquireError),
 
     /// Serde_json error
     #[error("Serde_json error: {0}")]
