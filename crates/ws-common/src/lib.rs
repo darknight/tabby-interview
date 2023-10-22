@@ -1,5 +1,6 @@
 mod model;
 mod error;
+mod shutdown;
 
 use std::collections::BTreeMap;
 use walkdir::{DirEntry, WalkDir};
@@ -7,6 +8,7 @@ use log::{debug, error};
 
 pub use model::{EntryType, FileEntry, FileMeta, FileChunk, WsRequest, WsResponse};
 pub use error::{AppError, Result};
+pub use shutdown::Shutdown;
 
 /// Walk directory and return file meta infos
 pub fn walk_dir(base_dir: String, contain_symlink: bool) -> BTreeMap<FileMeta, DirEntry> {

@@ -1,6 +1,8 @@
 use clap::Parser;
-use log::{debug, error};
+use log::{debug, error, info};
+use tokio::sync::broadcast;
 use ws_common::{Result, AppError};
+use ws_receiver::WsReceiver;
 
 /// Command line arguments for ws-cli
 #[derive(Parser, Debug)]
@@ -33,12 +35,12 @@ async fn main() -> Result<()> {
     match args {
         Args { port: Some(port), output_dir: Some(output_dir), from: None, to: None } => {
             // create receiver
-            let mut receiver = ws_receiver::WsReceiver::new(port, output_dir).await?;
-            if let Err(err) = receiver.run().await {
-                error!("receiver run error: {}", err);
-                receiver.stop().await?;
-            }
-            Ok(())
+            // let mut receiver = ws_receiver::WsReceiver::new(port, output_dir).await?;
+            // if let Err(err) = receiver.run().await {
+            //     error!("receiver run error: {}", err);
+            //     receiver.stop().await?;
+            // }
+            run_receiver(port, output_dir).await
         },
         Args { port: None, output_dir: None, from: Some(from_dir), to: Some(ws_addr) } => {
             // create sender
@@ -51,4 +53,29 @@ async fn main() -> Result<()> {
             Err(AppError::InvalidArgs("Invalid arguments, see --help for how to use".to_string()))
         }
     }
+}
+
+pub async fn run_receiver(port: u16, output_dir: String) -> Result<()> {
+    let (shutdown_sender, _) = broadcast::channel(1);
+    // create receiver
+    let mut receiver = WsReceiver::new(port, output_dir, shutdown_sender).await?;
+
+    tokio::select! {
+        res = receiver.run() => {
+            if let Err(err) = res {
+                error!("receiver runtime error: {}", err);
+            }
+        },
+        _ = tokio::signal::ctrl_c() => {
+            info!("ctrl-c received, shut down");
+        }
+    }
+
+    receiver.stop().await?;
+
+    let WsReceiver { shutdown_sender, .. } = receiver;
+    debug!("drop shutdown sender");
+    drop(shutdown_sender);
+
+    Ok(())
 }
