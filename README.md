@@ -1,5 +1,7 @@
 # tabby-interview
 
+The interview question is described [here](https://github.com/TabbyML/interview-questions/tree/main/301_sync_directory_over_websocket).
+
 ## Get Started
 
 ## Assumptions
@@ -29,7 +31,29 @@ Besides, I also made some other assumptions for the implementation.
 
 ## Design Decision
 
-### Send big files
+### Only one sender connection
+
+### Graceful shutdown
+
+### Send large files
+
+#### Message ordering
+
+On sender side, for large files, we split file into chunks.
+
+In order to be able to re-create the file on receiver side, we need to make sure the chunks are sent in order.
+
+From `tokio::sync::mpsc::channel` documentation, it says:
+
+```
+All data sent on Sender will become available on Receiver in the same order as it was sent.
+```
+
+As for the network transmission, websocket relies on TCP, and TCP is a stream-oriented protocol.
+
+So as long as there's no proxy or middleman to re-order the data, we can assume that the data will be received in order.
+
+So the file **append** operation on receiver side is safe.
 
 ### PID file in receiver's directory
 
@@ -41,9 +65,18 @@ Besides, I also made some other assumptions for the implementation.
 
 ### Workflow
 
+## Program verification
+
+- start receiver
+- quit receiver, check PID file
+
+- start receiver again
+- start sender
+- start another sender
+
 ## Limitations & Improvement
 
-### Write done notification
+### Write completion notification
 
 - Add command line argument to control
   - log level, log output file

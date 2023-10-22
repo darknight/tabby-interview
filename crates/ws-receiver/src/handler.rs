@@ -9,7 +9,7 @@ use crate::fileio::{clear_dir, create_file, write_file};
 /// It follows `read-process-write` pattern.
 /// Also, it listens for the shutdown signal and terminates the task if the signal is received.
 #[derive(Debug)]
-pub struct WsHandler {
+pub(crate) struct WsHandler {
     /// Output directory
     output_dir: String,
     /// Websocket connection under the hood

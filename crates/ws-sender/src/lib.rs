@@ -1,4 +1,8 @@
 mod sender;
+mod fileio;
+mod handler;
+mod connection;
+
 pub use sender::*;
 
 /// Default channel capacity

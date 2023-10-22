@@ -83,6 +83,9 @@ pub enum AppError {
     /// Semaphore acquire error
     #[error("Semaphore acquire error: {0}")]
     SemaphoreAcquireError(#[from] tokio::sync::AcquireError),
+    /// Tokio channel closed
+    #[error("Tokio channel closed")]
+    TokioChannelClosed,
 
     /// Serde_json error
     #[error("Serde_json error: {0}")]

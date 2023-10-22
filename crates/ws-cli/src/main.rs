@@ -3,6 +3,7 @@ use log::{debug, error, info};
 use tokio::sync::broadcast;
 use ws_common::{Result, AppError};
 use ws_receiver::WsReceiver;
+use ws_sender::WsSender;
 
 /// Command line arguments for ws-cli
 #[derive(Parser, Debug)]
@@ -21,7 +22,6 @@ struct Args {
     to: Option<String>,
 }
 
-// TODO: graceful shutdown
 #[tokio::main]
 async fn main() -> Result<()> {
     // init logging
@@ -44,10 +44,10 @@ async fn main() -> Result<()> {
         },
         Args { port: None, output_dir: None, from: Some(from_dir), to: Some(ws_addr) } => {
             // create sender
-            let sender = ws_sender::WsSender::new(from_dir, ws_addr)?;
-            let stream = sender.connect().await?;
-            stream.sync_dir().await?;
-            Ok(())
+            // let sender = ws_sender::WsSender::new(from_dir, ws_addr)?;
+            // let stream = sender.connect().await?;
+            // stream.sync_dir().await?;
+            run_sender(from_dir, ws_addr).await
         },
         _ => {
             Err(AppError::InvalidArgs("Invalid arguments, see --help for how to use".to_string()))
@@ -74,7 +74,31 @@ pub async fn run_receiver(port: u16, output_dir: String) -> Result<()> {
     receiver.stop().await?;
 
     let WsReceiver { shutdown_sender, .. } = receiver;
-    debug!("drop shutdown sender");
+    debug!("[main] drop shutdown sender");
+    drop(shutdown_sender);
+
+    Ok(())
+}
+
+pub async fn run_sender(from_dir: String, ws_addr: String) -> Result<()> {
+    let (shutdown_sender, _) = broadcast::channel(1);
+    let sender = ws_sender::WsSender::new(from_dir, ws_addr, shutdown_sender)?;
+
+    tokio::select! {
+        res = sender.run() => {
+            if let Err(err) = res {
+                error!("sender runtime error: {}", err);
+            }
+        },
+        _ = tokio::signal::ctrl_c() => {
+            info!("ctrl-c received, shut down");
+        }
+    }
+
+    sender.stop().await?;
+
+    let WsSender { shutdown_sender, .. } = sender;
+    debug!("[main] drop shutdown sender");
     drop(shutdown_sender);
 
     Ok(())
