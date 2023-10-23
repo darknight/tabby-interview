@@ -18,7 +18,7 @@ rustc 1.72.0 (5680fa18f 2023-08-23)
 
 ### build
 
-After pulling this [repo](https://github.com/darknight/tabby-interview.git)
+After pulling this project [repo](https://github.com/darknight/tabby-interview.git)
 
 ```bash
 cd tabby-interview
@@ -81,11 +81,15 @@ Besides, I also made some other assumptions for the implementation.
 
 ### Only one sender connection
 
-### Graceful shutdown
+This is a reasonable decision, since we expect the receiver's directory is the same as the sender's one.
 
-### Send large files
+If there are two senders sending files, this will cause data corruption.
 
-#### Message ordering
+Fortunately, `tokio` provide async version of `Semaphore` to help us.
+
+In receiver implementation, before accepting a new connection, we acquire a permit from the semaphore, subsequent connection will be waiting for the permit to be released.
+
+### Message ordering
 
 On sender side, for large files, we split file into chunks.
 
@@ -103,15 +107,54 @@ So as long as there's no proxy or middleman to re-order the data, we can assume 
 
 So the file **append** operation on receiver side is safe.
 
+### Send large files
+
+For large files, if we load the whole file into memory, then send it. It will consume too much memory and probably cause OOM.
+
+To make program more efficient and stable, we split the file into chunks, then send them separately.
+
+Based on the explanation of message ordering, we can assume that the chunks will be received in order.
+
+So on receiver side, what we need to do is open the file in append mode, then write the chunks.
+
 ### PID file in receiver's directory
+
+To make sure there's only one receiver running for specified output directory, we create a PID file in that directory.
+
+When receiver starts, it will check if the PID file exists, if it does, which means there might be another receiver using current directory, this program will exist.
+
+### Graceful shutdown
+
+To quit sender/receiver gracefully, we listen to `SIGINT` signal, `tokio` has built-in support for this.
+
+When receiver quits, it will remove the PID file generated when it starts.
 
 ### Symbolic links
 
+Symbolic links are skipped during syncing.
+
 ## Architecture
+
+### Layered Design
+
+Both sender and receiver are implemented in a layered design.
+
+- The top layer is the entity exposed to the user, which is the `Sender` and `Receiver` struct.
+- The middle layer is the handler which process application logic.
+- The bottom layer is the transport layer, which is the websocket connection.
 
 ### Project Structure
 
+The project contains four crates:
+
+- `ws-cli`: implementation for `sync-directory` command
+- `ws-common`: common code shared by other crates
+- `ws-receiver`: implementation for receiver
+- `ws-sender`: implementation for sender
+
 ### Workflow
+
+
 
 ## Program verification
 
@@ -124,13 +167,64 @@ So the file **append** operation on receiver side is safe.
 
 ## Limitations & Improvement
 
+I understand that the current implementation is far from perfect, there're still a lot of things to improve.
+
+To name a few I think are important:
+
 ### Write completion notification
 
-- Add command line argument to control
-  - log level, log output file
-  - if overwrite or skip same files
-- Increase test coverage
+Currently, when sender is done syncing, it will exist instead keep the connection alive.
+
+My idea is to count the number of file entries sent, and break from the loop when all the entries are sent.
+
+Due to time limit, I didn't implement this.
+
+### Concurrent write on receiver side
+
+Currently, the receiver has the pattern:
+
+- `read message from ws -> process message -> send process result to ws`
+
+The next read has be to waited until the previous `process-send` is done.
+
+Actually, it's not necessary, especially when writing different files.
+
+We can make the file write concurrently on receiver side, just like concurrent read on sender side.
+
+This may require more effort to implement, but it's definitely worth it.
+
+### Logging & Tracing & Metrics
+
+I understand these are essential for production program.
+
+Luckily, Rust ecosystem has good support for these.
+
+For example:
+
+- https://github.com/rust-lang/log
+- https://github.com/tokio-rs/tracing
+- https://github.com/tikv/rust-prometheus
+
+### Integration test
+
+Async, IO-intensive program is difficult to write unit test, the function are side effect, and the execution order is not deterministic. And we need to mock a lot of things, like network connection, filesystem etc.
+
+So I think integration test is more suitable, and necessary.
+
+### Send with deduplication
+
 - Compare file content to avoid unnecessary copy (for example, md5 or sha256 checksum)
-- For large files, split file into chunks and send them separately
+
+### Message serialization format & compression
+
 - Use more performant message serialization format (for example, protobuf)
+
+- Compress text message (for example, gzip)
+
+### Code improvement
+
+- Add command line argument to control `log level`, `log destination`, `max current read/write`, `overwrite option` etc.
+
+- Increase test coverage
+
 - Sanitize file path (dir/./subdir/../ -> dir/)

@@ -105,4 +105,3 @@ pub async fn write_file(output_dir: String, file_entry: FileEntry) -> Result<()>
 
     Ok(())
 }
-
