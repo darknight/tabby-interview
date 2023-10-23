@@ -1,35 +1,25 @@
 use std::path::Path;
-use futures::{SinkExt, StreamExt};
-use log::{debug, error, info, warn};
-use tokio::io::{AsyncReadExt, AsyncSeekExt};
-use tokio::net::TcpStream;
-use tokio::sync::{broadcast, mpsc};
+use futures::StreamExt;
+use tokio::io::AsyncReadExt;
+use tokio::sync::broadcast;
 use tokio::sync::mpsc::Sender;
-use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
-use ws_common::{Result, AppError, FileMeta, FileChunk, FileEntry, WsRequest, WsResponse, Shutdown};
+use ws_common::{Result, AppError, FileMeta, FileChunk, FileEntry, WsRequest, Shutdown};
 use walkdir::DirEntry;
-use crate::{CHANNEL_CAPACITY, FILE_CHUNK_SIZE};
+use crate::{FILE_CHUNK_SIZE};
 use crate::connection::{WsReader, WsWriter};
-use crate::fileio::walk_dir;
 use crate::handler::WsHandler;
 
 /// Websocket sender
 #[derive(Debug, Clone)]
 pub struct WsSender {
     from_dir: String,
-    ws_addr: String,
+    _ws_addr: String,
     ws_url: url::Url,
     /// Broadcast shutdown signal to all active connections
     pub shutdown_sender: broadcast::Sender<()>,
 }
-
-// /// Websocket stream
-// #[derive(Debug)]
-// pub struct WsStream {
-//     from_dir: String,
-//     ws_stream: WebSocketStream<MaybeTlsStream<TcpStream>>,
-// }
 
 impl WsSender {
     /// Given `from_dir` and `ws_addr`, create a websocket sender
@@ -46,20 +36,11 @@ impl WsSender {
 
         Ok(WsSender {
             from_dir,
-            ws_addr,
+            _ws_addr: ws_addr,
             ws_url,
             shutdown_sender,
         })
     }
-
-    // /// Connect to websocket server, return websocket stream
-    // pub async fn connect(&self) -> Result<WsStream> {
-    //     let (ws_stream, _) = connect_async(&self.ws_url).await?;
-    //     Ok(WsStream {
-    //         from_dir: self.from_dir.clone(),
-    //         ws_stream,
-    //     })
-    // }
 
     pub async fn run(&self) -> Result<()> {
         let (ws_stream, _) = connect_async(&self.ws_url).await?;
@@ -80,103 +61,6 @@ impl WsSender {
         Ok(())
     }
 }
-
-// impl WsStream {
-//     /// Sync directory via websocket stream
-//     pub async fn sync_dir(self) -> Result<()> {
-//         let from_dir = self.from_dir.clone();
-//         info!("[Sender] base directory: {}", from_dir);
-//         let (mut outgoing, mut incoming) = self.ws_stream.split();
-//
-//         // create channel to collect file entry from tasks
-//         let (tx, mut rx) = mpsc::channel::<Message>(CHANNEL_CAPACITY);
-//
-//         // spawn blocking task to walk directory
-//         let meta_infos = tokio::task::spawn_blocking(move || {
-//             walk_dir(from_dir, false)
-//         }).await?;
-//
-//         let file_metas = meta_infos.keys().cloned().collect::<Vec<FileMeta>>();
-//         let message = WsRequest::new_clear_dir_message(file_metas)?;
-//         outgoing.send(message).await?;
-//
-//         // spawn a task to accept file entry from channel and send them to receiver
-//         tokio::spawn(async move {
-//             while let Some(msg) = rx.recv().await {
-//                 debug!("[Sender] send ws request");
-//                 if let Err(err) = outgoing.send(msg).await {
-//                     error!("[Sender] failed to send ws request: {}", err);
-//                 }
-//             }
-//         });
-//
-//         // read message from incoming stream
-//         while let Some(raw) = incoming.next().await {
-//             match raw {
-//                 Ok(msg) => {
-//                     match msg {
-//                         Message::Text(text) => {
-//                             let ws_resp = serde_json::from_str::<WsResponse>(&text);
-//                             if ws_resp.is_err() {
-//                                 error!("[Sender] failed to parse ws response: {}", text);
-//                                 continue;
-//                             }
-//                             let ws_resp = ws_resp.unwrap();
-//                             match ws_resp {
-//                                 WsResponse::CreateSuccess(file_meta) => {
-//                                     info!("[Sender] peer create file done: {:?}", file_meta);
-//                                     if file_meta.is_file() {
-//                                         if let Some(dir_entry) = meta_infos.get(&file_meta) {
-//                                             let tx = tx.clone();
-//                                             let dir_entry = dir_entry.clone();
-//                                             tokio::spawn(async move {
-//                                                 if let Err(err) = send_write_file_message(tx, file_meta, dir_entry.clone()).await {
-//                                                     error!("[Sender] create file entry: {}", err);
-//                                                 }
-//                                             });
-//                                         }
-//                                     }
-//                                 }
-//                                 WsResponse::CreateFailed(file_meta) => {
-//                                     error!("[Sender] peer create file failed: {:?}", file_meta);
-//                                 }
-//                                 WsResponse::WriteSuccess(file_meta) => {
-//                                     info!("[Sender] peer write done: {:?}", file_meta);
-//                                 }
-//                                 WsResponse::WriteFailed(file_meta) => {
-//                                     error!("[Sender] peer write failed: {:?}", file_meta);
-//                                     // TODO: retry?
-//                                  }
-//                                 WsResponse::ClearDirDone(_) => {
-//                                     info!("[Sender] peer dir is ready");
-//                                     // spawn task to send create file message
-//                                     meta_infos.clone().into_iter().for_each(|(file_meta, _)| {
-//                                         let tx = tx.clone();
-//                                         tokio::spawn(async move {
-//                                             if let Err(err) = send_create_file_message(tx, file_meta).await {
-//                                                 error!("[Sender] send create file message: {}", err);
-//                                             }
-//                                         });
-//                                     });
-//                                 },
-//                             }
-//                         },
-//                         Message::Close(_) => {
-//                             warn!("[Sender] connection is closed by receiver");
-//                             return Ok(());
-//                         },
-//                         _ => {},
-//                     }
-//                 }
-//                 Err(err) => {
-//                     error!("[Sender] read message error: {}", err);
-//                 }
-//             }
-//         }
-//
-//         Ok(())
-//     }
-// }
 
 /// Compose `CreateFile` message and send it to channel
 pub async fn send_create_file_message(tx: Sender<Message>, file_meta: FileMeta) -> Result<()> {

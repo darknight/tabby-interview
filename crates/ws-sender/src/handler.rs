@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use log::{debug, error, info, warn};
+use log::{debug, error, info};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio_tungstenite::tungstenite::Message;
@@ -31,7 +31,7 @@ impl WsHandler {
         }
     }
 
-    pub async fn run(mut self) -> Result<()> {
+    pub async fn run(self) -> Result<()> {
         let WsHandler {
             from_dir,
             mut ws_writer,
@@ -40,7 +40,7 @@ impl WsHandler {
             shutdown_for_reader,
         } = self;
         // create channel to collect file entry from tasks
-        let (tx, mut rx) = mpsc::channel::<Message>(CHANNEL_CAPACITY);
+        let (tx, rx) = mpsc::channel::<Message>(CHANNEL_CAPACITY);
 
         // spawn blocking task to walk directory
         info!("[Sender] base directory: {}", from_dir);
@@ -65,7 +65,7 @@ impl WsHandler {
             }
         });
 
-        tokio::join!(sending, receiving);
+        let _ = tokio::join!(sending, receiving);
         Ok(())
     }
 }

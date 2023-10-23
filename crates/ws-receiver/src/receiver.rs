@@ -1,18 +1,13 @@
-use std::net::SocketAddr;
-use log::{debug, error, info, warn};
+use log::{debug, error, info};
 use tokio::fs;
-use tokio::net::{TcpListener, TcpStream};
-use ws_common::{Result, AppError, WsRequest, FileEntry, WsResponse, FileMeta, Shutdown};
+use tokio::net::TcpListener;
+use ws_common::{Result, AppError, Shutdown};
 use std::path::Path;
-use std::sync::{Arc, Mutex};
-use futures::{SinkExt, StreamExt};
-use tokio::fs::OpenOptions;
-use tokio::io::{AsyncSeekExt, AsyncWriteExt};
-use tokio::sync::{broadcast, mpsc, OwnedSemaphorePermit, Semaphore};
-use tokio_tungstenite::tungstenite::Message;
-use crate::{ADDR, CHANNEL_CAPACITY, PID_FILE};
+use std::sync::Arc;
+use tokio::sync::{broadcast, Semaphore};
+use crate::{ADDR, PID_FILE};
 use crate::connection::WsConnection;
-use crate::fileio::{clear_dir, create_file, prepare_output_dir, write_file};
+use crate::fileio::{prepare_output_dir};
 use crate::handler::WsHandler;
 
 /// Websocket receiver
@@ -104,120 +99,6 @@ impl WsReceiver {
         Ok(())
     }
 }
-
-// /// Handle incoming connection
-// async fn handle_connection(output_dir: String, stream: TcpStream, permit: Option<OwnedSemaphorePermit>) -> Result<()> {
-//     let mut ws_stream = tokio_tungstenite::accept_async(stream).await?;
-//
-//     // send receiver busy message and close stream
-//     if permit.is_none() {
-//         let resp = WsResponse::new_receiver_busy_message()?;
-//         ws_stream.send(resp).await?;
-//         return Ok(());
-//     }
-//
-//     let (mut outgoing, mut incoming) = ws_stream.split();
-//     // create channel to collect file entry from tasks
-//     let (tx, mut rx) = mpsc::channel::<Message>(CHANNEL_CAPACITY);
-//
-//     // spawn a task to collect message and send back to `sender`
-//     tokio::spawn(async move {
-//         while let Some(msg) = rx.recv().await {
-//             debug!("[Receiver] send ws response: {:?}", msg);
-//             if let Err(err) = outgoing.send(msg).await {
-//                 error!("[Receiver] failed to send ws response: {}", err);
-//             }
-//         }
-//     });
-//
-//     while let Some(msg) = incoming.next().await {
-//         match msg {
-//             Ok(msg) => {
-//                 match msg {
-//                     Message::Text(text) => {
-//                         let ws_req = serde_json::from_str::<WsRequest>(&text);
-//                         if ws_req.is_err() {
-//                             error!("[Receiver] failed to parse message: {}", text);
-//                             continue;
-//                         }
-//                         let ws_req = ws_req.unwrap();
-//                         match ws_req {
-//                             WsRequest::CreateFile(file_meta) => {
-//                                 debug!("[Receiver] got create file message: {:?}", file_meta);
-//                                 let tx = tx.clone();
-//                                 let out = output_dir.clone();
-//                                 tokio::spawn(async move {
-//                                     let resp = match create_file(out, file_meta.clone()).await {
-//                                         Ok(_) => {
-//                                             WsResponse::new_create_success_message(file_meta)
-//                                         }
-//                                         Err(err) => {
-//                                             error!("[Receiver] create file error: {:?}", err);
-//                                             WsResponse::new_create_failed_message(file_meta)
-//                                         }
-//                                     };
-//                                     if let Err(err) = resp {
-//                                         error!("[Receiver] failed to create ws response: {:?}", err);
-//                                         return;
-//                                     }
-//                                     if let Err(err) = tx.send(resp.unwrap()).await {
-//                                         error!("[Receiver] failed to send ws response: {}", err);
-//                                     }
-//                                 });
-//                             }
-//                             WsRequest::WriteFile(file_entry) => {
-//                                 debug!("[Receiver] got write file message: {:?}", file_entry);
-//                                 let tx = tx.clone();
-//                                 let out = output_dir.clone();
-//                                 tokio::spawn(async move {
-//                                     let file_meta = file_entry.file_meta();
-//                                     let resp = match write_file(out, file_entry).await {
-//                                         Ok(_) => {
-//                                             WsResponse::new_write_success_message(file_meta)
-//                                         }
-//                                         Err(err) => {
-//                                             error!("[Receiver] write file error: {:?}", err);
-//                                             WsResponse::new_write_failed_message(file_meta)
-//                                         }
-//                                     };
-//                                     if let Err(err) = resp {
-//                                         error!("[Receiver] failed to create ws response: {:?}", err);
-//                                         return;
-//                                     }
-//                                     if let Err(err) = tx.send(resp.unwrap()).await {
-//                                         error!("[Receiver] failed to send ws response: {}", err);
-//                                     }
-//                                 });
-//                             }
-//                             WsRequest::ClearDir(_) => {
-//                                 info!("[Receiver] got clear dir message");
-//                                 // accept new connection, clear local dir, send response
-//                                 if let Err(err) = clear_dir(output_dir.clone()).await {
-//                                     error!("[Receiver] failed to clear dir: {:?}", err);
-//                                     // TODO: retry?
-//                                 }
-//                                 let resp = WsResponse::new_clear_dir_done_message(vec![]);
-//                                 if let Err(err) = resp {
-//                                     error!("[Receiver] failed to create ws response: {:?}", err);
-//                                     continue;
-//                                 }
-//                                 if let Err(err) = tx.send(resp.unwrap()).await {
-//                                     error!("[Receiver] failed to send ws response: {}", err);
-//                                 }
-//                             }
-//                         }
-//                     }
-//                     _ => {}
-//                 }
-//             }
-//             Err(err) => {
-//                 error!("[Receiver] read message error: {}", err);
-//             }
-//         }
-//     }
-//
-//     Ok(())
-// }
 
 #[cfg(test)]
 mod tests {

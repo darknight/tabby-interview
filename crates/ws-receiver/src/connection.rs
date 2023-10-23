@@ -1,6 +1,6 @@
 use futures::{SinkExt, StreamExt};
 use tokio::net::TcpStream;
-use tokio_tungstenite::{MaybeTlsStream, tungstenite, WebSocketStream};
+use tokio_tungstenite::{tungstenite, WebSocketStream};
 use tokio_tungstenite::tungstenite::Message;
 use ws_common::{AppError, Result};
 

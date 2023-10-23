@@ -1,6 +1,6 @@
 use log::{debug, error, info};
 use tokio_tungstenite::tungstenite::Message;
-use ws_common::{Shutdown, Result, AppError, WsRequest, WsResponse};
+use ws_common::{Shutdown, Result, WsRequest, WsResponse};
 use crate::connection::WsConnection;
 use crate::fileio::{clear_dir, create_file, write_file};
 
