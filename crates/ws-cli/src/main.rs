@@ -71,7 +71,9 @@ pub async fn run_receiver(port: u16, output_dir: String) -> Result<()> {
         }
     }
 
-    receiver.stop().await?;
+    if let Err(err) = receiver.stop().await {
+        error!("receiver stop error: {}", err);
+    }
 
     let WsReceiver { shutdown_sender, .. } = receiver;
     debug!("[main] drop shutdown sender");
@@ -95,7 +97,9 @@ pub async fn run_sender(from_dir: String, ws_addr: String) -> Result<()> {
         }
     }
 
-    sender.stop().await?;
+    if let Err(err) = sender.stop().await {
+        error!("sender stop error: {}", err);
+    }
 
     let WsSender { shutdown_sender, .. } = sender;
     debug!("[main] drop shutdown sender");

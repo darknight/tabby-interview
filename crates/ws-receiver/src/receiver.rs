@@ -12,7 +12,7 @@ use tokio::sync::{broadcast, mpsc, OwnedSemaphorePermit, Semaphore};
 use tokio_tungstenite::tungstenite::Message;
 use crate::{ADDR, CHANNEL_CAPACITY, PID_FILE};
 use crate::connection::WsConnection;
-use crate::fileio::{clear_dir, create_file, write_file};
+use crate::fileio::{clear_dir, create_file, prepare_output_dir, write_file};
 use crate::handler::WsHandler;
 
 /// Websocket receiver
@@ -40,34 +40,12 @@ impl WsReceiver {
         if port < 1024 {
             return Err(AppError::SystemReservedPort(port));
         }
-
-        // check output_dir
-        let out_dir = Path::new(&output_dir);
-        if out_dir.exists() {
-            if !out_dir.is_dir() {
-                return Err(AppError::InvalidDir(output_dir.clone()));
-            }
-            // check if `PID_FILE` file exists
-            let pid_file = out_dir.join(PID_FILE);
-            warn!("pid file: {:?}, exists? {}", pid_file, pid_file.exists());
-            if pid_file.exists() {
-                return Err(AppError::DirInUse(output_dir.clone()));
-            }
-        } else {
-            // create output_dir
-            fs::create_dir_all(out_dir).await.map_err(AppError::FailedCreateDir)?;
-        }
-
-        // start receiver server
+        // create listener
         let addr = format!("{}:{}", ADDR, port);
         let listener = TcpListener::bind(&addr).await.map_err(AppError::FailedBind)?;
         debug!("[Receiver] Listening on: {}", addr);
 
-        // create `PID_FILE` for current receiver
-        let pid_file = out_dir.join(PID_FILE);
-        fs::write(pid_file, format!("{}", std::process::id())).await
-            .map_err(AppError::FailedWriteFile)?;
-        debug!("[Receiver] Done writing pid file in dir: {:?}", out_dir);
+        prepare_output_dir(&output_dir).await?;
 
         // all good, return WsReceiver instance
         Ok(WsReceiver {
