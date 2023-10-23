@@ -1,3 +1,5 @@
+mod macros;
+
 use clap::Parser;
 use log::{debug, error, info};
 use tokio::sync::broadcast;
@@ -34,76 +36,13 @@ async fn main() -> Result<()> {
     // arguments check
     match args {
         Args { port: Some(port), output_dir: Some(output_dir), from: None, to: None } => {
-            // create receiver
-            // let mut receiver = ws_receiver::WsReceiver::new(port, output_dir).await?;
-            // if let Err(err) = receiver.run().await {
-            //     error!("receiver run error: {}", err);
-            //     receiver.stop().await?;
-            // }
-            run_receiver(port, output_dir).await
+            ws_run!(WsReceiver, port, output_dir)
         },
         Args { port: None, output_dir: None, from: Some(from_dir), to: Some(ws_addr) } => {
-            // create sender
-            // let sender = ws_sender::WsSender::new(from_dir, ws_addr)?;
-            // let stream = sender.connect().await?;
-            // stream.sync_dir().await?;
-            run_sender(from_dir, ws_addr).await
+            ws_run!(WsSender, from_dir, ws_addr)
         },
         _ => {
             Err(AppError::InvalidArgs("Invalid arguments, see --help for how to use".to_string()))
         }
     }
-}
-
-pub async fn run_receiver(port: u16, output_dir: String) -> Result<()> {
-    let (shutdown_sender, _) = broadcast::channel(1);
-    // create receiver
-    let mut receiver = WsReceiver::new(port, output_dir, shutdown_sender).await?;
-
-    tokio::select! {
-        res = receiver.run() => {
-            if let Err(err) = res {
-                error!("receiver runtime error: {}", err);
-            }
-        },
-        _ = tokio::signal::ctrl_c() => {
-            info!("ctrl-c received, shut down");
-        }
-    }
-
-    if let Err(err) = receiver.stop().await {
-        error!("receiver stop error: {}", err);
-    }
-
-    let WsReceiver { shutdown_sender, .. } = receiver;
-    debug!("[main] drop shutdown sender");
-    drop(shutdown_sender);
-
-    Ok(())
-}
-
-pub async fn run_sender(from_dir: String, ws_addr: String) -> Result<()> {
-    let (shutdown_sender, _) = broadcast::channel(1);
-    let sender = ws_sender::WsSender::new(from_dir, ws_addr, shutdown_sender)?;
-
-    tokio::select! {
-        res = sender.run() => {
-            if let Err(err) = res {
-                error!("sender runtime error: {}", err);
-            }
-        },
-        _ = tokio::signal::ctrl_c() => {
-            info!("ctrl-c received, shut down");
-        }
-    }
-
-    if let Err(err) = sender.stop().await {
-        error!("sender stop error: {}", err);
-    }
-
-    let WsSender { shutdown_sender, .. } = sender;
-    debug!("[main] drop shutdown sender");
-    drop(shutdown_sender);
-
-    Ok(())
 }

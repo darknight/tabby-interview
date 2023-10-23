@@ -1,4 +1,5 @@
 use std::path::Path;
+use futures::future::ready;
 use futures::StreamExt;
 use tokio::io::AsyncReadExt;
 use tokio::sync::broadcast;
@@ -25,7 +26,7 @@ impl WsSender {
     /// Given `from_dir` and `ws_addr`, create a websocket sender
     ///
     /// `from_dir` must be valid directory
-    pub fn new(from_dir: String, ws_addr: String, shutdown_sender: broadcast::Sender<()>) -> Result<WsSender> {
+    pub async fn new(from_dir: String, ws_addr: String, shutdown_sender: broadcast::Sender<()>) -> Result<WsSender> {
         // check if `from_dir` is valid directory
         let path = Path::new(&from_dir);
         if !path.is_dir() {
@@ -34,12 +35,14 @@ impl WsSender {
 
         let ws_url = url::Url::parse(&ws_addr)?;
 
-        Ok(WsSender {
-            from_dir,
-            _ws_addr: ws_addr,
-            ws_url,
-            shutdown_sender,
-        })
+        ready(
+            Ok(WsSender {
+                from_dir,
+                _ws_addr: ws_addr,
+                ws_url,
+                shutdown_sender,
+            })
+        ).await
     }
 
     /// Run the websocket sender
@@ -52,7 +55,7 @@ impl WsSender {
             WsWriter::new(outgoing),
             WsReader::new(incoming),
             Shutdown::new(self.shutdown_sender.subscribe()),
-            Shutdown::new(self.shutdown_sender.subscribe())
+            Shutdown::new(self.shutdown_sender.subscribe()),
         );
 
         handler.run().await
