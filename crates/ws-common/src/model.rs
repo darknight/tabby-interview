@@ -265,3 +265,75 @@ impl WsResponse {
         Ok(message)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_file_meta() {
+        let file_meta = FileMeta::new("test.txt".to_string(), EntryType::File, 1024);
+        assert_eq!(file_meta.rel_path(), "test.txt");
+        assert_eq!(file_meta.is_file(), true);
+        assert_eq!(file_meta.is_dir(), false);
+        assert_eq!(file_meta.is_sym_link(), false);
+        assert_eq!(file_meta.file_size(), 1024);
+    }
+
+    #[test]
+    fn test_file_chunk() {
+        let file_chunk = FileChunk::new(0, vec![1, 2, 3]);
+        assert_eq!(file_chunk.offset(), 0);
+        assert_eq!(file_chunk.payload(), &[1, 2, 3]);
+    }
+
+    #[test]
+    fn test_file_entry() {
+        let payload = vec![1, 2, 3u8];
+        let file_meta = FileMeta::new("test.txt".to_string(), EntryType::File, 1024);
+        let file_chunk = FileChunk::new(0, payload.clone());
+        let file_entry = FileEntry::new(file_meta.clone(), Some(file_chunk.clone()));
+        assert_eq!(file_entry.file_offset(), Some(0));
+        assert_eq!(file_entry.file_content(), Some(payload.as_slice()));
+        assert_eq!(file_entry.rel_path(), "test.txt");
+        assert_eq!(file_entry.is_file(), true);
+        assert_eq!(file_entry.is_dir(), false);
+        assert_eq!(file_entry.is_sym_link(), false);
+        assert_eq!(file_entry.file_meta(), file_meta);
+    }
+
+    #[test]
+    fn test_ws_request() {
+        let file_meta = FileMeta::new("test.txt".to_string(), EntryType::File, 1024);
+        let file_chunk = FileChunk::new(0, vec![1, 2, 3]);
+        let file_entry = FileEntry::new(file_meta.clone(), Some(file_chunk.clone()));
+        let ws_req = WsRequest::CreateFile(file_meta.clone());
+        let message = WsRequest::new_create_file_message(file_meta.clone()).unwrap();
+        assert_eq!(message, Message::Text(serde_json::to_string(&ws_req).unwrap()));
+        let ws_req = WsRequest::WriteFile(file_entry.clone());
+        let message = WsRequest::new_write_file_message(file_entry.clone()).unwrap();
+        assert_eq!(message, Message::Text(serde_json::to_string(&ws_req).unwrap()));
+    }
+
+    #[test]
+    fn test_ws_response() {
+        let file_meta = FileMeta::new("test.txt".to_string(), EntryType::File, 1024);
+        let file_chunk = FileChunk::new(0, vec![1, 2, 3]);
+        let file_entry = FileEntry::new(file_meta.clone(), Some(file_chunk.clone()));
+        let ws_resp = WsResponse::CreateSuccess(file_meta.clone());
+        let message = WsResponse::new_create_success_message(file_meta.clone()).unwrap();
+        assert_eq!(message, Message::Text(serde_json::to_string(&ws_resp).unwrap()));
+        let ws_resp = WsResponse::CreateFailed(file_meta.clone());
+        let message = WsResponse::new_create_failed_message(file_meta.clone()).unwrap();
+        assert_eq!(message, Message::Text(serde_json::to_string(&ws_resp).unwrap()));
+        let ws_resp = WsResponse::WriteSuccess(file_meta.clone());
+        let message = WsResponse::new_write_success_message(file_meta.clone()).unwrap();
+        assert_eq!(message, Message::Text(serde_json::to_string(&ws_resp).unwrap()));
+        let ws_resp = WsResponse::WriteFailed(file_meta.clone());
+        let message = WsResponse::new_write_failed_message(file_meta.clone()).unwrap();
+        assert_eq!(message, Message::Text(serde_json::to_string(&ws_resp).unwrap()));
+        let ws_resp = WsResponse::ClearDirDone(vec![file_meta.clone()]);
+        let message = WsResponse::new_clear_dir_done_message(vec![file_meta.clone()]).unwrap();
+        assert_eq!(message, Message::Text(serde_json::to_string(&ws_resp).unwrap()));
+    }
+}

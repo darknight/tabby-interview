@@ -74,7 +74,7 @@ impl WsReceiver {
             info!("[Receiver] New connection from: {}", addr);
 
             // create ws stream based on tcp stream
-            let mut ws_stream = tokio_tungstenite::accept_async(stream).await?;
+            let ws_stream = tokio_tungstenite::accept_async(stream).await?;
             let mut ws_handler = WsHandler::new(
                 self.output_dir.clone(),
                 WsConnection::new(ws_stream),
@@ -222,4 +222,5 @@ impl WsReceiver {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // TODO: add tests
 }

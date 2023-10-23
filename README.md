@@ -4,6 +4,54 @@ The interview question is described [here](https://github.com/TabbyML/interview-
 
 ## Get Started
 
+### development environment
+
+`rustup show`:
+
+```
+active toolchain
+----------------
+
+stable-x86_64-pc-windows-msvc (default)
+rustc 1.72.0 (5680fa18f 2023-08-23)
+```
+
+### build
+
+After pulling this [repo](https://github.com/darknight/tabby-interview.git)
+
+```bash
+cd tabby-interview
+cargo build
+```
+
+### run receiver
+
+After build, the executable file `.\target\debug\sync-directory.exe` will be generated.
+
+```bash
+.\target\debug\sync-directory.exe --port 9000 --output-dir .\recv_dir
+```
+
+The `recv_dir` will be created under the current directory (project root, e.g. `.\tabby-interview`)
+if it doesn't exist.
+
+### run sender
+
+After receiver is running up, open another shell, and run
+
+```bash
+.\target\debug\sync-directory.exe --to ws://localhost:9000 --from .\crates
+```
+
+This will sync all the contents in `.\crates`(actually the source codes in this project) to `.\recv_dir`.
+
+### run unit tests
+
+```bash
+cargo test --workspace
+```
+
 ## Assumptions
 
 Based on the minimum requirements described in the question, I made two assumptions for each of them.
