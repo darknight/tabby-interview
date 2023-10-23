@@ -1,4 +1,4 @@
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use tokio_tungstenite::tungstenite::Message;
 use ws_common::{Shutdown, Result, WsRequest, WsResponse};
 use crate::connection::WsConnection;
@@ -99,7 +99,9 @@ impl WsHandler {
                     }
                 }
             }
-            _ => {}
+            _ => {
+                warn!("[Receiver] unexpected message: {:?}", msg);
+            }
         }
 
         Ok(())

@@ -58,7 +58,7 @@ pub async fn clear_dir(output_dir: String) -> Result<()> {
 
 /// Create file or directory, if it's a file, create with size info from `file_meta`
 pub async fn create_file(output_dir: String, file_meta: FileMeta) -> Result<()> {
-    let target_path = Path::new(&output_dir).join(&file_meta.rel_path());
+    let target_path = Path::new(&output_dir).join(file_meta.rel_path());
     if file_meta.is_dir() {
         if !target_path.exists() {
             fs::create_dir_all(target_path).await.map_err(AppError::FailedCreateDir)?;
@@ -88,7 +88,7 @@ pub async fn write_file(output_dir: String, file_entry: FileEntry) -> Result<()>
         return Err(AppError::EmptyPayload);
     }
 
-    let target_path = Path::new(&output_dir).join(&file_entry.rel_path());
+    let target_path = Path::new(&output_dir).join(file_entry.rel_path());
     if !target_path.exists() {
         error!("[Receiver] file not exists, shouldn't happen: {:?}", target_path);
         return Err(AppError::FileNotExist(target_path.to_str().unwrap_or("").to_string()));
