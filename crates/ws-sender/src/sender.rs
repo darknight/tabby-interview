@@ -42,6 +42,7 @@ impl WsSender {
         })
     }
 
+    /// Run the websocket sender
     pub async fn run(&self) -> Result<()> {
         let (ws_stream, _) = connect_async(&self.ws_url).await?;
         let (outgoing, incoming) = ws_stream.split();

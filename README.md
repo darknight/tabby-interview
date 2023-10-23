@@ -152,18 +152,9 @@ The project contains four crates:
 - `ws-receiver`: implementation for receiver
 - `ws-sender`: implementation for sender
 
-### Workflow
+### Sequence Diagram
 
-
-
-## Program verification
-
-- start receiver
-- quit receiver, check PID file
-
-- start receiver again
-- start sender
-- start another sender
+![sequence diagram](./tabby.drawio.svg)
 
 ## Limitations & Improvement
 
@@ -178,6 +169,12 @@ Currently, when sender is done syncing, it will exist instead keep the connectio
 My idea is to count the number of file entries sent, and break from the loop when all the entries are sent.
 
 Due to time limit, I didn't implement this.
+
+### Reduce IO calls
+
+Currently, when receiver receives a file entry, it will open the file in append mode, write the data. After the write, the file is closed.
+
+Actually, we can keep the file open until the final file entry is written. This can improve the performance significantly for the large files.
 
 ### Concurrent write on receiver side
 
@@ -213,7 +210,13 @@ So I think integration test is more suitable, and necessary.
 
 ### Send with deduplication
 
-- Compare file content to avoid unnecessary copy (for example, md5 or sha256 checksum)
+Currently, when sender is connected to the receiver, it first sends a `ClearDir` message to ask receiver to clear the directory.
+
+This is inefficient when two sides are almost the same, in this case the sender has to send all the files again, which wastes bandwidth and receiver's resources.
+
+To mitigate this, we can walk through the source, compute the checksum for each file, then send the file meta info together with checksum. On receiver side, we compare the checksum, if it's the same, then we skip the file. The receiver sends back the response with file list info which need to be synced.
+
+Current implementation has extension design to support this, but I didn't implement it due to time limit.
 
 ### Message serialization format & compression
 

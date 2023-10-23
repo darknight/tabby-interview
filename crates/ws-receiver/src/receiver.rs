@@ -29,7 +29,7 @@ impl WsReceiver {
     /// `output_dir` will be checked to make sure it's valid (i.e. exists and is a directory).
     /// If `output_dir` doesn't exist, it will be created first.
     ///
-    /// After the check, we'll try to bind to `ADDR:port` and start listening.
+    /// The tcp listener will try to bind to `ADDR:port` and start listening.
     pub async fn new(port: u16, output_dir: String, shutdown_sender: broadcast::Sender<()>) -> Result<WsReceiver> {
         // check port
         if port < 1024 {
@@ -54,7 +54,7 @@ impl WsReceiver {
     /// Start accepting incoming connections
     ///
     /// Current design is to only accept one connection at a time. All subsequent connections will
-    /// receive an error message and be rejected.
+    /// keep waiting.
     ///
     /// NOTE:
     /// Alternatively, we can use a queue to hold all incoming connections, but this will

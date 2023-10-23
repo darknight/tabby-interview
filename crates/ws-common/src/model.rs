@@ -75,7 +75,7 @@ impl FileMeta {
 
 /// File chunk
 ///
-/// Currently, we don't support sending large file in chunks, so `offset` is reserved for future use.
+/// Currently, `offset` is reserved for future use.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FileChunk {
     offset: u64,
@@ -209,7 +209,7 @@ pub enum WsResponse {
     /// Write file failure response
     WriteFailed(FileMeta),
     /// This is the response to notify sender that receiver is ready to accept files
-    /// The file meta list filed contains files which are kept on receiver side
+    /// The file meta list field contains files which are kept on receiver side
     /// It may happen due to many reasons, such as
     /// 1. permission denied
     /// 2. file is being used by other process

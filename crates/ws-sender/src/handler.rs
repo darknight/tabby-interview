@@ -10,6 +10,7 @@ use ws_common::{AppError, Result};
 use crate::{CHANNEL_CAPACITY, send_create_file_message, send_write_file_message};
 use crate::fileio::walk_dir;
 
+/// Handler for sender
 pub(crate) struct WsHandler {
     from_dir: String,
     ws_writer: WsWriter,
@@ -20,6 +21,7 @@ pub(crate) struct WsHandler {
 
 impl WsHandler {
 
+    /// Create a new websocket handler
     pub fn new(from_dir: String, ws_writer: WsWriter, ws_reader: WsReader,
                shutdown_for_writer: Shutdown, shutdown_for_reader: Shutdown) -> Self {
         Self {
@@ -31,6 +33,9 @@ impl WsHandler {
         }
     }
 
+    /// Run the websocket handler
+    ///
+    /// Internally, it spawns two tasks, one for sending requests and the other for receiving responses.
     pub async fn run(self) -> Result<()> {
         let WsHandler {
             from_dir,
@@ -70,6 +75,7 @@ impl WsHandler {
     }
 }
 
+/// The sending task
 async fn run_for_sending(mut ws_writer: WsWriter,
                          mut rx: Receiver<Message>,
                          mut shutdown: Shutdown) -> Result<()> {
@@ -91,6 +97,7 @@ async fn run_for_sending(mut ws_writer: WsWriter,
     Ok(())
 }
 
+/// The receiving task
 async fn run_for_receiving(mut ws_reader: WsReader, tx: Sender<Message>,
                            mut shutdown: Shutdown,
                            meta_infos: BTreeMap<FileMeta, DirEntry>, ) -> Result<()> {
