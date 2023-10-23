@@ -1,12 +1,11 @@
 use std::collections::BTreeMap;
 use log::{debug, error, info};
 use tokio::sync::mpsc;
-use tokio::sync::mpsc::{Receiver, Sender};
 use tokio_tungstenite::tungstenite::Message;
 use walkdir::DirEntry;
 use ws_common::{FileMeta, Shutdown, WsRequest, WsResponse};
 use crate::connection::{WsReader, WsWriter};
-use ws_common::{AppError, Result};
+use ws_common::Result;
 use crate::{CHANNEL_CAPACITY, send_create_file_message, send_write_file_message};
 use crate::fileio::walk_dir;
 
@@ -22,8 +21,11 @@ pub(crate) struct WsHandler {
 impl WsHandler {
 
     /// Create a new websocket handler
-    pub fn new(from_dir: String, ws_writer: WsWriter, ws_reader: WsReader,
-               shutdown_for_writer: Shutdown, shutdown_for_reader: Shutdown) -> Self {
+    pub fn new(from_dir: String,
+               ws_writer: WsWriter,
+               ws_reader: WsReader,
+               shutdown_for_writer: Shutdown,
+               shutdown_for_reader: Shutdown) -> Self {
         Self {
             from_dir,
             ws_writer,
@@ -77,19 +79,27 @@ impl WsHandler {
 
 /// The sending task
 async fn run_for_sending(mut ws_writer: WsWriter,
-                         mut rx: Receiver<Message>,
+                         mut rx: mpsc::Receiver<Message>,
                          mut shutdown: Shutdown) -> Result<()> {
     while !shutdown.is_shutdown() {
-        let msg: Message = tokio::select! {
-            res = rx.recv() => res.ok_or(AppError::TokioChannelClosed)?,
+        let msg: Option<Message> = tokio::select! {
+            res = rx.recv() => res,
             _ = shutdown.recv() => {
                 // If a shutdown signal is received, return and terminate the task.
                 debug!("[Sender|Handler|Writer] shutdown signal received");
+                ws_writer.close().await?;
                 return Ok(());
             }
         };
 
-        if let Err(err) = ws_writer.write_message(msg).await {
+        if msg.is_none() {
+            // channel is closed, return and terminate the task.
+            debug!("[Sender|Handler|Writer] channel closed");
+            ws_writer.close().await?;
+            return Ok(());
+        }
+
+        if let Err(err) = ws_writer.write_message(msg.unwrap()).await {
             error!("[Sender] failed to send ws request: {}", err);
         }
     }
@@ -98,9 +108,10 @@ async fn run_for_sending(mut ws_writer: WsWriter,
 }
 
 /// The receiving task
-async fn run_for_receiving(mut ws_reader: WsReader, tx: Sender<Message>,
+async fn run_for_receiving(mut ws_reader: WsReader,
+                           tx: mpsc::Sender<Message>,
                            mut shutdown: Shutdown,
-                           meta_infos: BTreeMap<FileMeta, DirEntry>, ) -> Result<()> {
+                           meta_infos: BTreeMap<FileMeta, DirEntry>) -> Result<()> {
     while !shutdown.is_shutdown() {
         let msg: Message = tokio::select! {
             res = ws_reader.read_message() => res?,
@@ -111,6 +122,12 @@ async fn run_for_receiving(mut ws_reader: WsReader, tx: Sender<Message>,
             }
         };
 
+        if msg.is_close() {
+            debug!("[Sender|Handler|Reader] close message received");
+            return Ok(());
+        }
+
+        // normal message, continue processing
         if let Err(err) = process_incoming_message(
             msg,
             meta_infos.clone(),
@@ -125,7 +142,7 @@ async fn run_for_receiving(mut ws_reader: WsReader, tx: Sender<Message>,
 /// Process incoming message
 async fn process_incoming_message(msg: Message,
                                   meta_infos: BTreeMap<FileMeta, DirEntry>,
-                                  tx: Sender<Message>) -> Result<()> {
+                                  tx: mpsc::Sender<Message>) -> Result<()> {
     match msg {
         Message::Text(text) => {
             let ws_resp = serde_json::from_str::<WsResponse>(&text)?;
@@ -167,10 +184,10 @@ async fn process_incoming_message(msg: Message,
                     });
                 }
             }
-        }
+        },
         _ => {
             // ignore other message types
-        }
+        },
     }
 
     Ok(())

@@ -164,7 +164,9 @@ To name a few I think are important:
 
 ### Write completion notification
 
-Currently, when sender is done syncing, it will exist instead keep the connection alive.
+Currently, when sender is done syncing, it won't exist but keep the connection alive.
+
+And `ctrl-c` will cause websocket error on receiver side, which is not graceful.
 
 My idea is to count the number of file entries sent, and break from the loop when all the entries are sent.
 
@@ -175,6 +177,14 @@ Due to time limit, I didn't implement this.
 Currently, when receiver receives a file entry, it will open the file in append mode, write the data. After the write, the file is closed.
 
 Actually, we can keep the file open until the final file entry is written. This can improve the performance significantly for the large files.
+
+### Action on IO error
+
+Currently, file IO error are just logged, and the program continues.
+
+We need to take care of this, and make sure the program can recover from IO error.
+
+For example, if file write fails, should we retry? If so, how to do that?
 
 ### Concurrent write on receiver side
 
@@ -224,7 +234,7 @@ Current implementation has extension design to support this, but I didn't implem
 
 - Compress text message (for example, gzip)
 
-### Code improvement
+### Other improvements
 
 - Add command line argument to control `log level`, `log destination`, `max current read/write`, `overwrite option` etc.
 

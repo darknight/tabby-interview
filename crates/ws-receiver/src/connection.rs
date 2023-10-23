@@ -31,4 +31,9 @@ impl WsConnection {
     pub async fn write_message(&mut self, msg: Message) -> Result<()> {
         self.ws_stream.send(msg).await.map_err(AppError::WsError)
     }
+
+    /// Close websocket connection
+    pub async fn close(&mut self) -> Result<()> {
+        self.ws_stream.close(None).await.map_err(AppError::WsError)
+    }
 }

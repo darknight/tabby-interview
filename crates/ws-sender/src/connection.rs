@@ -25,6 +25,11 @@ impl WsWriter {
     pub async fn write_message(&mut self, msg: Message) -> Result<()> {
         self.outgoing.send(msg).await.map_err(AppError::WsError)
     }
+
+    /// Close websocket connection
+    pub async fn close(&mut self) -> Result<()> {
+        self.outgoing.close().await.map_err(AppError::WsError)
+    }
 }
 
 /// Websocket reader

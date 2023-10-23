@@ -37,12 +37,20 @@ impl WsHandler {
                 res = self.ws_conn.read_message() => res?,
                 _ = self.shutdown.recv() => {
                     // If a shutdown signal is received, return and terminate the task.
-                    debug!("[Receiver|Handler] shutdown signal received");
+                    debug!("[Receiver|Handler] shutdown received, close ws connection & return");
+                    self.ws_conn.close().await?;
                     return Ok(());
                 }
             };
 
+            if msg.is_close() {
+                debug!("[Receiver|Handler] close message received, close ws connection & return");
+                self.ws_conn.close().await?;
+                return Ok(());
+            }
+
             // TODO: concurrent process
+            // normal message, continue processing
             if let Err(err) = self.process_message(msg).await {
                 error!("[Receiver|Handler] process message error: {:?}", err);
                 continue;
