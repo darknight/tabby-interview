@@ -18,7 +18,7 @@ rustc 1.72.0 (5680fa18f 2023-08-23)
 
 ### build
 
-After pulling this project [repo](https://github.com/darknight/tabby-interview.git)
+After pulling current project [repo](https://github.com/darknight/tabby-interview.git)
 
 ```bash
 cd tabby-interview
@@ -52,32 +52,27 @@ This will sync all the contents in `.\crates`(actually the source codes in this 
 cargo test --workspace
 ```
 
-## Assumptions
-
-Based on the minimum requirements described in the question, I made two assumptions for each of them.
-
-I'm not quite sure if the assumptions are reasonable or not, but these indeed help me to finalize the design and implementation.
-
-We can discuss the assumptions during the interview if necessary.
-
-1. Implement the "sync" semantic.
-
-   It's missing one condition that a file exists in both sender's and receiver's directory. In this condition, I'll just **overwrite** the file in receiver's directory.
-
-   This is definitely not ideal. If a file in the receiver's side is exactly the same as in the sender's one, then the copy is unnecessary. But I think it's acceptable for now.
-
-2. Directory syncing should be performed recursively.
-
-   By saying `recursively` my understanding is that we want to sync all the files in the directory and its subdirectories and so on.
-
-   It's **NOT** related to implementation details. Based on what I know, Rust doesn't support tail recursion optimization officially ([only as experimental feature](https://github.com/rust-lang/rust/issues/112788)), which means there's a risk for recursive traversing to get stack overflow if the directory is too deep. So it's better not use recursion in the implementation.
-
-Besides, I also made some other assumptions for the implementation.
-
-- Skip syncing symbolic links, cause the `symlink` in one filesystem might not be valid in another one.
-  So there's no point to sync it.
-
 ## Design Decision
+
+### Implement the "sync" semantic
+
+This is one of the minimum requirements. The method I've used to implement this is a bit of brute force.
+
+Before syncing, I'll clean up receiver's directory first, then send all the files from sender to receiver.
+
+I understand this is not most efficient way, but it allows me to iterate quickly.
+
+In `Send with deduplication` section, I mentioned a better way to do this.
+
+### Directory syncing should be performed recursively
+
+This is another minimum requirement.
+
+By saying `recursively`, my understanding is that we want to sync all the files in the directory and its subdirectories and so on.
+
+It's **NOT** related to implementation details. Based on what I know, Rust doesn't support tail recursion optimization officially ([only as experimental feature](https://github.com/rust-lang/rust/issues/112788)), which means there's a risk for recursive traversing to get stack overflow if the directory is too deep. So it's better not use recursion in the implementation.
+
+Luckily, there is a well-maintained library [walkdir](https://docs.rs/walkdir/latest/walkdir/index.html) which can help us to do the job.
 
 ### Only one sender connection
 
@@ -125,7 +120,7 @@ When receiver starts, it will check if the PID file exists, if it does, which me
 
 ### Graceful shutdown
 
-To quit sender/receiver gracefully, we listen to `SIGINT` signal, `tokio` has built-in support for this.
+To quit receiver gracefully, we listen to `SIGINT` signal, `tokio` has built-in support for this.
 
 When receiver quits, it will remove the PID file generated when it starts.
 
@@ -154,6 +149,8 @@ The project contains four crates:
 
 ### Sequence Diagram
 
+Below is a rough sequence diagram for the program, to help understand how the program works.
+
 ![sequence diagram](./tabby.drawio.svg)
 
 ## Limitations & Improvement
@@ -166,9 +163,7 @@ To name a few I think are important:
 
 Currently, when sender is done syncing, it won't exist but keep the connection alive.
 
-And `ctrl-c` will cause websocket error on receiver side, which is not graceful.
-
-My idea is to count the number of file entries sent, and break from the loop when all the entries are sent.
+One way is to count the number of file entries sent, and return from the tokio tasks when all the entries are sent.
 
 Due to time limit, I didn't implement this.
 
@@ -190,7 +185,7 @@ For example, if file write fails, should we retry? If so, how to do that?
 
 Currently, the receiver has the pattern:
 
-- `read message from ws -> process message -> send process result to ws`
+- `read message from websocket -> process message -> send process result to websocket`
 
 The next read has be to waited until the previous `process-send` is done.
 
@@ -214,7 +209,7 @@ For example:
 
 ### Integration test
 
-Async, IO-intensive program is difficult to write unit test, the function are side effect, and the execution order is not deterministic. And we need to mock a lot of things, like network connection, filesystem etc.
+Async, IO-intensive program is difficult to write unit test, the functions are side effect, and the execution order is not deterministic. And we need to mock a lot of things, like network connection, filesystem etc.
 
 So I think integration test is more suitable, and necessary.
 
@@ -226,7 +221,7 @@ This is inefficient when two sides are almost the same, in this case the sender 
 
 To mitigate this, we can walk through the source, compute the checksum for each file, then send the file meta info together with checksum. On receiver side, we compare the checksum, if it's the same, then we skip the file. The receiver sends back the response with file list info which need to be synced.
 
-Current implementation has extension design to support this, but I didn't implement it due to time limit.
+Current implementation has extension design to support this, but I didn't fully implement it due to time limit.
 
 ### Message serialization format & compression
 

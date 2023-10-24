@@ -167,7 +167,8 @@ pub enum WsRequest {
     CreateFile(FileMeta),
     /// Write file request, by saying file here it refers to either file or directory
     WriteFile(FileEntry),
-    /// File meta list of sender's local dir
+    /// Application level handshake
+    /// It contains file meta list of sender's local dir
     ///
     /// Receiver can use this list as filter to decide which files and directories need
     /// to be removed.
