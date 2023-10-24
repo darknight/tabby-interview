@@ -1,12 +1,14 @@
 use std::collections::BTreeMap;
 use log::{debug, error, info};
+use tokio::io::AsyncReadExt;
 use tokio::sync::mpsc;
+use tokio::sync::mpsc::Sender;
 use tokio_tungstenite::tungstenite::Message;
 use walkdir::DirEntry;
-use ws_common::{FileMeta, Shutdown, WsRequest, WsResponse};
+use ws_common::{FileMeta, Shutdown, FileChunk, FileEntry, WsRequest, WsResponse, AppError};
 use crate::connection::{WsReader, WsWriter};
 use ws_common::Result;
-use crate::{CHANNEL_CAPACITY, send_create_file_message, send_write_file_message};
+use crate::{FILE_CHUNK_SIZE, CHANNEL_CAPACITY};
 use crate::fileio::walk_dir;
 
 /// Handler for sender
@@ -188,6 +190,42 @@ async fn process_incoming_message(msg: Message,
         _ => {
             // ignore other message types
         },
+    }
+
+    Ok(())
+}
+
+/// Compose `CreateFile` message and send it to channel
+pub async fn send_create_file_message(tx: Sender<Message>, file_meta: FileMeta) -> Result<()> {
+    let message = WsRequest::new_create_file_message(file_meta)?;
+    tx.send(message).await.map_err(AppError::TokioSendError)?;
+
+    Ok(())
+}
+
+/// Compose `WriteFile` message and send it to channel
+pub async fn send_write_file_message(tx: Sender<Message>, file_meta: FileMeta, dir_entry: DirEntry) -> Result<()> {
+    if !file_meta.is_file() {
+        return Ok(());
+    }
+
+    let mut file = tokio::fs::File::open(dir_entry.path()).await
+        .map_err(AppError::FailedOpenFile)?;
+    let mut buf = vec![0; FILE_CHUNK_SIZE];
+    let mut offset = 0u64;
+
+    // read file into buffer and send file entry to channel
+    while let Ok(n) = file.read(&mut buf).await {
+        if n == 0 {
+            break;
+        }
+        let actual_payload = buf[..n].to_vec();
+        let file_chunk = FileChunk::new(offset, actual_payload);
+        let file_entry = FileEntry::new(file_meta.clone(), Some(file_chunk));
+        let message = WsRequest::new_write_file_message(file_entry)?;
+        tx.send(message).await.map_err(AppError::TokioSendError)?;
+        // next offset
+        offset += n as u64;
     }
 
     Ok(())

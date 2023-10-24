@@ -1,14 +1,9 @@
 use std::path::Path;
 use futures::future::ready;
 use futures::StreamExt;
-use tokio::io::AsyncReadExt;
 use tokio::sync::broadcast;
-use tokio::sync::mpsc::Sender;
 use tokio_tungstenite::connect_async;
-use tokio_tungstenite::tungstenite::Message;
-use ws_common::{Result, AppError, FileMeta, FileChunk, FileEntry, WsRequest, Shutdown};
-use walkdir::DirEntry;
-use crate::{FILE_CHUNK_SIZE};
+use ws_common::{Result, AppError, Shutdown};
 use crate::connection::{WsReader, WsWriter};
 use crate::handler::WsHandler;
 
@@ -61,45 +56,10 @@ impl WsSender {
         handler.run().await
     }
 
+    /// Stop the websocket sender
     pub async fn stop(&self) -> Result<()> {
         Ok(())
     }
-}
-
-/// Compose `CreateFile` message and send it to channel
-pub async fn send_create_file_message(tx: Sender<Message>, file_meta: FileMeta) -> Result<()> {
-    let message = WsRequest::new_create_file_message(file_meta)?;
-    tx.send(message).await.map_err(AppError::TokioSendError)?;
-
-    Ok(())
-}
-
-/// Compose `WriteFile` message and send it to channel
-pub async fn send_write_file_message(tx: Sender<Message>, file_meta: FileMeta, dir_entry: DirEntry) -> Result<()> {
-    if !file_meta.is_file() {
-        return Ok(());
-    }
-
-    let mut file = tokio::fs::File::open(dir_entry.path()).await
-        .map_err(AppError::FailedOpenFile)?;
-    let mut buf = vec![0; FILE_CHUNK_SIZE];
-    let mut offset = 0u64;
-
-    // read file into buffer and send file entry to channel
-    while let Ok(n) = file.read(&mut buf).await {
-        if n == 0 {
-            break;
-        }
-        let actual_payload = buf[..n].to_vec();
-        let file_chunk = FileChunk::new(offset, actual_payload);
-        let file_entry = FileEntry::new(file_meta.clone(), Some(file_chunk));
-        let message = WsRequest::new_write_file_message(file_entry)?;
-        tx.send(message).await.map_err(AppError::TokioSendError)?;
-        // next offset
-        offset += n as u64;
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]
