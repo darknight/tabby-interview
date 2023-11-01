@@ -267,7 +267,7 @@ vec![
 ]
 ```
 
-In step 4, we get all the pairs from `Word`, for example, `Word(4-5-3)` produces `(4, 5)` & `(5, 3)`. Then we calculate the occurrence of each pair, also track which `Word` contributes the count to the pair, so that later when merge happens, we'll know which word need to be updated accordingly.
+**In step 4**, we get all the pairs from `Word`, for example, `Word(4-5-3)` produces `(4, 5)` & `(5, 3)`. Then we calculate the occurrence of each pair, also track which `Word` contributes the count to the pair, so that later when merge happens, we'll know which word need to be updated accordingly.
 
 After step 4, we'll have:
 
@@ -384,20 +384,56 @@ So after the iteration, we'll have the Word instance for "gug":
 "gug" -> Word(3-5-3) // not valid code, just for demonstration
 ```
 
-Now the word is ready, we proceed to do merging:
+Now the word is ready, we proceed to do merging by calling:
 
 ```rust
 word.merge_all(merges, ...); // merges is the merge rules from BPE model
 ```
 
-In the method, we first find all the possible pairs in the word, see if a merge rule exists for the pair, if so, we put pair info + merge rule info into a priority queue. The priority queue sorts the elements by the ranking of the merge rule, so that we can always pick the most frequent pair to merge.
+The core idea of `merge_all` method can be summarized as below:
 
-Then, we keep popping the top element from the heap, merge the pair based on the attached merge rule, mutate the word, update the heap accordingly.
+```rust
+let mut queue = BinaryHeap::with_capacity(self.symbols.len());
+
+queue.extend(
+    // find all the possible pairs from symbols
+    // see if a merge rule exists for the pair
+    // if so, create a struct which contains
+    struct {
+        pos: // index of symbols where the pair is found
+        rank: // ranking of the merge rule, the queue uses this to sort the elements
+        new_id: // the new token id from the merge rule
+    }
+)
+
+while let Some(top) = queue.pop() {
+    let right = self.symbols[self.symbols[top.pos].next as usize];
+    let target_new_pair = (self.symbols[top.pos].c, right.c);
+    // merge top with right, update the word, maintain correct state
+
+    let current = &self.symbols[top.pos];
+    if current.prev >= 0 {
+        let prev = current.prev as usize;
+        let prev_symbol = self.symbols[prev];
+        let new_pair = (prev_symbol.c, current.c);
+        // if merge rules exist for the new pair, add it to the queue
+        queue.push(...);
+    }
+
+    let next = current.next as usize;
+    if next < self.symbols.len() {
+        let next_symbol = self.symbols[next];
+        let new_pair = (current.c, next_symbol.c);
+        // if merge rules exist for the new pair, add it to the queue
+        queue.push(...);
+    }
+}
+```
 
 After the merge, our example will have the following representation:
 
 ```rust
-"gug" -> Word(3-6) // 6 is the new token id for "ug"
+"gug" -> Word(3-6) // pair (5, 3) matches a merge rule (5, 3) -> 6
 ```
 
 We iterate until the heap is empty, then we get the final representation of the word.
