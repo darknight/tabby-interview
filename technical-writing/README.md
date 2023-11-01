@@ -267,9 +267,9 @@ vec![
 ]
 ```
 
-In step 4, we calculate the frequency of each pair of tokens, also track which word contributes the count to the pair, so that later when merge happens, we'll know which word need to be updated accordingly.
+In step 4, we get all the pairs from `Word`, for example, `Word(4-5-3)` produces `(4, 5)` & `(5, 3)`. Then we calculate the occurrence of each pair, also track which `Word` contributes the count to the pair, so that later when merge happens, we'll know which word need to be updated accordingly.
 
-For the example, will have:
+After step 4, we'll have:
 
 ```rust
 pair_counts:
@@ -278,37 +278,41 @@ pair_counts:
     (2, 5) -> 3
 
 where_to_update:
-    (4, 5) -> [0]    // means "hug" contributes the count
-    (5, 3) -> [0, 1] // means "hug" & "bug" contribute the count
-    (2, 5) -> [1]    // means "bug" contributes the count
+    (4, 5) -> [0]    // [0] is index of word list generated in step 3, which is "hug"
+    (5, 3) -> [0, 1] // means both "hug" & "bug" contribute the count
+    (2, 5) -> [1]
 ```
 
 Now we have all the pairs, pairs occurrence count, and where they come from, we're ready to learn the merge rules.
 
-Before step 5, we build a binary heap to help us find the most frequent pair efficiently.
+Before step 5, we build a heap, add all pairs into it. The heap is sorted by the occurrence count of the pair, so that we can always pick the most frequent pair to merge.
 
-Then in step 5, we keep popping the top element from the heap, merge the pair to generate a new token, try to add the new token into `word_to_id` and `id_to_word`, then we save this info as merge rule:
+**In step 5**, we keep popping the top element from the heap, merge the pair to generate a new token, try to add the new token into `word_to_id` and `id_to_word`, then we save this info as merge rule:
+
+The core logic is as below:
 
 ```rust
 type Pair = (u32, u32);
 let mut merges: Vec<(Pair, u32)> = vec![];
 
-let mut top = queue.pop().unwrap();
+let mut top = queue.pop().unwrap(); // queue is a BinaryHeap
 let part_a = &id_to_word[top.pair.0 as usize];
 let mut part_b = id_to_word[top.pair.1 as usize].to_owned();
 let new_token = format!("{}{}", part_a, part_b);
 let new_token_id = word_to_id.get(&new_token).copied().unwrap_or(id_to_word.len() as u32);
+if word_to_id.get(&new_token).is_none() {
+    id_to_word.push(new_token.clone());
+    word_to_id.insert(new_token.clone(), new_token_id);
+}
 merges.push((top.pair, new_token_id));
 ```
 
-Then we find out what has changed, what need to be updated and update them accordingly:
+Now we have a new merge rule, we need to find all the affected `Word`s, execute the merge. After the change, we'll have new pairs generated, we add them into the heap. This process is repeated until some termination condition is reached(for example, the desired vocabulary size).
 
-This process is repeated until some termination condition is reached(for example, the desired vocabulary size).
-
-Go back to the example, after the first loop iteration, we'll have:
+Go back to the example, after the first iteration, we'll have:
 
 ```rust
-word_2_id:
+word_to_id:
     "[CLS]" -> 0
     "[SEP]" -> 1
     "b" -> 2
@@ -317,24 +321,30 @@ word_2_id:
     "u" -> 5
     "ug" -> 6
 
-id_2_word:
+id_to_word:
     ["[CLS]", "[SEP]", "b", "g", "h", "u", "ug"]
 
 merges:
-    (5, 3) -> 6 // means "u" & "g" are merged into "ug" and new id for "ug" is 6
+    (5, 3) -> 6 // means "u" & "g" are merged into "ug" and new token is 6
+
+Words:
+vec![
+    "hug" -> Word(4-6)
+    "bug" -> Word(2-6)
+]
 ```
 
-When the iteration is done, we'll have the merge rules ready, we save both `word_to_id` and `merges` into BPE model instance, which marks the end of training.
+When the iteration is done, we do some transformation on `merges` and `word_to_id`, save them to BPE model, the training is done.
 
 ## The tokenization algorithm implementation
 
-After training, the model contains the vocabulary and merge rules, now we can use it to tokenize a string.
+After training, the model contains the vocabulary and merge rules, it's ready to tokenize a string.
 
 ### Calling chain for tokenization
 
 ![tokenization](./tokenization.drawio.svg)
 
-The public interface for tokenization is `TokenizerImpl::encode`, which takes a input and a boolean flag.
+The public interface for tokenization is `TokenizerImpl::encode`, which takes a input and a boolean flag. The bool flag controls if adding special tokens to the output in the post-processing phase.
 
 The simplest case is taking a plain ascii text such as:
 
@@ -342,13 +352,13 @@ The simplest case is taking a plain ascii text such as:
 let output = tokenizer.encode("Hello, y'all! How are you ?", true)?;
 ```
 
-Following the calling chain, we can see we do `normalization`, `pre-tokenization` just like what we do during the training phase.
+Following the calling chain, we can see we do `normalization`, `pre-tokenization` work just like what we do during the training phase.
 
 In the `do_tokenize` method, we actually delegate the work to `BPE` model we trained earlier.
 
 The heavy work is done in `BPE::merge_word` & `Word::merge_all` methods, which are the implementation of the tokenization algorithm we've covered in the previous section.
 
-Let's use the same example to explain what's done inside.
+Let's use the same example to explain what's done there.
 
 Assume we have the following vocabulary and merge rules for BPE model:
 
@@ -363,18 +373,18 @@ vocab:
     "ug" -> 6
 
 merges:
-    (5, 3) -> (0, 6) // 0 is the ranking of the merge rule, 6 is the new token id
+    (5, 3) -> (0, 6) // 0 is the ranking of the merge rule, most frequent pair has the highest ranking
 ```
 
-Suppose we're tokenizing the word "gug", in `merge_word` method, we'll first split the word into characters, query model's `vocab` dictionary to get the token id. We build `Word` data structure with the token id, this is the linked list we used in training phase to maintain mutable state of tokens.
+Suppose we're tokenizing the word "gug", in `merge_word` method, we'll first split the word into characters, query model's `vocab` dictionary to get the token id. We build `Word` data structure again with the token id info, like the training phase.
 
 So after the iteration, we'll have the Word instance for "gug":
 
 ```rust
-"gug" -> Word(3-5-3) // this is not actual Word representation, just for illustration
+"gug" -> Word(3-5-3) // not valid code, just for demonstration
 ```
 
-Now the word is ready, we need to do merging:
+Now the word is ready, we proceed to do merging:
 
 ```rust
 word.merge_all(merges, ...); // merges is the merge rules from BPE model
@@ -382,7 +392,7 @@ word.merge_all(merges, ...); // merges is the merge rules from BPE model
 
 In the method, we first find all the possible pairs in the word, see if a merge rule exists for the pair, if so, we put pair info + merge rule info into a priority queue. The priority queue sorts the elements by the ranking of the merge rule, so that we can always pick the most frequent pair to merge.
 
-Then, we keep popping the top element from the heap, merge the pair based on the attached rule, mutate the word, and update the heap accordingly.
+Then, we keep popping the top element from the heap, merge the pair based on the attached merge rule, mutate the word, update the heap accordingly.
 
 After the merge, our example will have the following representation:
 
@@ -390,7 +400,9 @@ After the merge, our example will have the following representation:
 "gug" -> Word(3-6) // 6 is the new token id for "ug"
 ```
 
-Since the `word` contains token id, and BPE model contains dual mapping between token id and token string, we can easily get the token string representation for the token id, this is what `word_to_token` method does.
+We iterate until the heap is empty, then we get the final representation of the word.
+
+And since the `Word` contains token id, and BPE model contains dual mapping between token id and token string, we can easily get the token string representation for the word, this is what `word_to_token` method does.
 
 # Summary
 
@@ -406,4 +418,4 @@ I tried to explain the concepts and implementation in concise way, not dive into
 
 Also, since this doc focuses on the BPE model, the other parts of tokenization pipeline are not covered, either.
 
-But still I do think it is a good guide for people who want to understand how BPE works and how it's implemented in the `huggingface/tokenizers` library.
+But still it is a good guide for people who want to understand BPE and how it's implemented in the `huggingface/tokenizers` library.
