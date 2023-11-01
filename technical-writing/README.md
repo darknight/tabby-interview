@@ -1,3 +1,25 @@
+- [Introduction](#introduction)
+- [First of all, what is a tokenizer anyway?](#first-of-all-what-is-a-tokenizer-anyway)
+  - [Tokenization pipeline](#tokenization-pipeline)
+    - [Normalization](#normalization)
+    - [Pre-tokenization](#pre-tokenization)
+    - [Model](#model)
+    - [Postprocessor](#postprocessor)
+- [Ok, I get it, then what is BPE?](#ok-i-get-it-then-what-is-bpe)
+  - [The training algorithm](#the-training-algorithm)
+  - [The tokenization algorithm](#the-tokenization-algorithm)
+- [Show me the code](#show-me-the-code)
+  - [High level overview](#high-level-overview)
+  - [The training algorithm implementation](#the-training-algorithm-implementation)
+    - [Calling chain for training](#calling-chain-for-training)
+    - [Feed](#feed)
+    - [Train](#train)
+  - [The tokenization algorithm implementation](#the-tokenization-algorithm-implementation)
+    - [Calling chain for tokenization](#calling-chain-for-tokenization)
+- [Summary](#summary)
+
+# Introduction
+
 In this document, I'll talk about BPE tokenizer, more specifically:
 
 - How it works
