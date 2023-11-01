@@ -51,7 +51,7 @@ The `huggingface/tokenizers` supports loading **pretrained** tokenizer from file
 
 Post-processing is the last step of the tokenization pipeline, to perform any additional transformation to the final result before it’s returned, like adding potential special tokens (like `[CLS]` and `[SEP]` shown in the diagram above).
 
-# Ok, I get it, what is BPE then?
+# Ok, I get it, then what is BPE?
 
 BPE stands for **Byte-Pair-Encoding**. It was initially developed as an algorithm to compress texts, and then used by OpenAI for tokenization when pretraining the GPT model. It’s used by a lot of Transformer models, including GPT, GPT-2, RoBERTa, BART, and DeBERTa. It's one of the most popular subword tokenization algorithm nowadays.
 
@@ -63,7 +63,7 @@ As we mentioned earlier, to have a functional BPE tokenizer, we need to train th
 
 BPE training starts by computing the unique set of words used in the corpus (after normalization and pre-tokenization), then building the vocabulary by taking all the symbols used to write those words.
 
-For example, if we have a corpus with the following words:
+Let's use an example (taken from [NL Course](https://huggingface.co/learn/nlp-course/chapter6/5)) to explain how it works.
 
 ```
 ["hug", "pug", "pun", "bun", "hugs"]
@@ -121,7 +121,7 @@ Tokenization process is similar to the training process, except that instead of 
 
 3. Splitting the words into individual characters
 
-4. Applying the merge rules learned in order on those splits
+4. Applying the merge rules learned on those splits
 
 Let's reuse the example from the training section:
 
@@ -131,11 +131,13 @@ Corpus: ("hug", 10), ("pug", 5), ("pun", 12), ("bun", 4), ("hugs", 5)
 Merges: ("u", "g") -> "ug", ("u", "n") -> "un", ("h", "ug") -> "hug"
 ```
 
-If we tokenize the word "bug", it will be tokenized as ["b", "ug"].
+If we tokenize the word `bug`, it will be tokenized as ["b", "ug"].
 
-"mug", however, will be tokenized as ["[UNK]", "ug"] since the letter "m" was not in the base vocabulary.
+`mug`, however, will be tokenized as ["[UNK]", "ug"] since the letter "m" was not in the base vocabulary.
 
-Likewise, the word "thug" will be tokenized as ["[UNK]", "hug"]: the letter "t" is not in the base vocabulary, and applying the merge rules results first in "u" and "g" being merged and then "h" and "ug" being merged.
+Likewise, the word `thug` will be tokenized as ["[UNK]", "hug"]: the letter "t" is not in the base vocabulary. For the characters ("h", "u", "g"), first we apply the merge rule ("u", "g") -> "ug" to get ("h", "ug"), then we apply the merge rule ("h", "ug") -> "hug" to get "hug" as the final token.
+
+Be aware that if there are multiple merge rules can be applied, we always pick the one with the highest ranking (i.e. most frequent pair).
 
 # Show me the code
 
