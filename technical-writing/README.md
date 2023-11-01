@@ -145,23 +145,23 @@ Now we have all the knowledge in mind, let's see how they are applied in the `hu
 
 ## High level overview
 
-Nothing is better than a diagram to help understand.
+Nothing better than a diagram can help us understand the code structure in a top-down way.
 
 Here is the high level overview of library itself.
 
 ![overview](./bpe.drawio.svg)
 
-Each step in the pipeline is defined as a `trait`, and there are different implementations for each step. The `Tokenizer` object wraps `TokenizerImpl` object, which groups all the steps together.
+Each step in the pipeline is defined as a `pub trait`, and there are different implementations for each step. The `Tokenizer` object wraps `TokenizerImpl` object, which groups all the steps together.
 
-The `Decoder` trait is used to decode the tokenized string back to the original string, it's separate functionality, that's why it's not part of the pipeline.
+The `Decoder` trait is used to decode the tokens back to the original string, it's a separate functionality instead of a part of the pipeline.
 
-From the diagram we can see, the library applies `builder` design pattern extensively, which provides friendly interface for users to customize the tokenizer.
+From the diagram we can see, the library applies `builder` design pattern extensively, which provides friendly interface to users to customize the tokenizer and underlying model.
 
 We won't cover all the components but only focus on `Model` part and see how it implemented the BPE algorithm.
 
-## Training implementation details
+## The training algorithm implementation
 
-Let's dive into the code and see how the BPE training algorithm is implemented in `tokenizers` library.
+Let's dive into the code and see how the BPE training algorithm is implemented.
 
 ### Calling chain for training
 
@@ -169,9 +169,9 @@ Let's dive into the code and see how the BPE training algorithm is implemented i
 
 From the calling chain we can see, there are two important method calls: `feed` & `train`.
 
-#### Feed
+### Feed
 
-The only job of `feed` is to calculate all the occurrences of each word for the given input. Then save the result to `words` field of `BpeTrainer`.
+The only job of `feed` is to calculate all the occurrences of each word for the given input (after normalization and pre-tokenization). Then save the result to `words` field of `BpeTrainer`.
 
 ```rust
 pub struct BpeTrainer {
@@ -180,9 +180,17 @@ pub struct BpeTrainer {
 }
 ```
 
-The `feed` implementation will try to make the input be processed in parallel if possible, by using the `rayon` library inside of it.
+Let's use an example to demonstrate the training process. Suppose the corpus is `vec!["hug bug hug bug bug"]`, after feeding, we'll have:
 
-#### Train
+```rust
+words:
+    "hug" -> 2
+    "bug" -> 3
+```
+
+The `feed` implementation also supports parallel processing, which is enabled by default. It uses the popular `rayon` library to do the job.
+
+### Train
 
 The `train` method is just wrapper of `BpeTrainer::do_train` method, which does all the heavy work inside.
 
@@ -193,7 +201,7 @@ let mut word_to_id: HashMap<String, u32> = HashMap::with_capacity(self.vocab_siz
 let mut id_to_word: Vec<String> = Vec::with_capacity(self.vocab_size);
 ```
 
-`word_to_id` is used to keep every token we've seen, and `id_to_word` is used to allocate next token id for new token, they're updated together like this:
+`word_to_id` is used to keep every token we've seen, and `id_to_word` is used to allocate next token id for new token, they're updated together as a group:
 
 ```rust
 let s: String = // some new token
@@ -203,24 +211,23 @@ if !word_to_id.contains_key(&s) {
 }
 ```
 
-In step 1, we add all special tokens into `word_to_id` and `id_to_word`.
+The `do_train` method has 5 steps:
 
-In step 2, we add all characters we've seen from all the words into `word_to_id` and `id_to_word`.
-
-After 1 & 2, we already have a basic vocabulary, then we start to learn the merge rules.
-
-Step 3-5 is the implementation of the training algorithm which we've already covered in the previous section.
-
-Let's use an example to explain what's done in step 3-5.
-
-Assume we have completed all previous steps, and we have the following data:
+**In step 1**, it adds all special tokens into `word_to_id` and `id_to_word`. Let's say we have `["[CLS]", "[SEP]"]` as special tokens, after step 1, we'll get:
 
 ```rust
-word_counts:
-    "hug" -> 2
-    "bug" -> 3
+word_to_id:
+    "[CLS]" -> 0
+    "[SEP]" -> 1
 
-word_2_id:
+id_to_word:
+    ["[CLS]", "[SEP]"]
+  ```
+
+**In step 2**, it adds all characters we've seen from all the words into `word_to_id` and `id_to_word`. After this step, we'll have:
+
+```rust
+word_to_id:
     "[CLS]" -> 0
     "[SEP]" -> 1
     "b" -> 2
@@ -228,13 +235,13 @@ word_2_id:
     "h" -> 4
     "u" -> 5
 
-id_2_word:
-    ["[CLS]", "[SEP]", "b", "g", "h", "u"]
+id_to_word:
+    ["[CLS]", "[SEP]", "b", "g", "h", "u"] // single characters are sorted before inserting
 ```
 
-In step 3, we tokenize the words, that will transform the string representation to token id representation.
+After 1 & 2, we already have a basic vocabulary, then we start to learn the merge rules.
 
-The `Word` type has the following definition:
+Step 3-5 are the implementation of the training algorithm which we've described in the previous section. There's an important data structure called `Word` used in these steps, below is the definition of it:
 
 ```rust
 pub(super) struct Word {
@@ -249,14 +256,14 @@ struct Symbol {
 }
 ```
 
-Essentially, `Word` is a list of `Symbol`, and `Symbol` is a linked list of token id. It'll be used to compose token pairs, and be updated when merge happens.
+Essentially, `Word` is a list of `Symbol`, `Word` behaves like a linked list of token id. It is a numeric representation of a word, it tracks the merging state of the word during the training process.
 
-In a nutshell, after step3, the original words will have the following representation:
+**In step 3**, we tokenize the words by using basic vocabulary we've built in step 1 & 2. For the example corpus, we'll have:
 
 ```rust
 vec![
-    "hug" -> Word(4-5-3) which 4, 5, 3 are token id,
-    "bug" -> Word(2-5-3) which 2, 5, 3 are token id,
+    "hug" -> Word(4-5-3) which 4, 5, 3 are token id // not valid code, just for demonstration
+    "bug" -> Word(2-5-3) which 2, 5, 3 are token id // not valid code, just for demonstration
 ]
 ```
 
@@ -319,7 +326,7 @@ merges:
 
 When the iteration is done, we'll have the merge rules ready, we save both `word_to_id` and `merges` into BPE model instance, which marks the end of training.
 
-## Tokenization implementation details
+## The tokenization algorithm implementation
 
 After training, the model contains the vocabulary and merge rules, now we can use it to tokenize a string.
 
