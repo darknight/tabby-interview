@@ -1,9 +1,7 @@
 In this document, I'll talk about BPE tokenizer, more specifically:
 
 - How it works
-- How it is implemented in the library (code-level design and implementation details)
-- How it is used in the tabby-ML/tabby project
-- Comparison with other tokenizers, such as openai/tiktoken
+- How it is implemented in the [huggingface/tokenizers](https://github.com/huggingface/tokenizers) library
 
 # First of all, what is a tokenizer anyway?
 
@@ -11,13 +9,13 @@ A tokenizer is a tool that splits a string into a list of tokens. There are many
 
 Word tokenizers split a string into a list of words. For example, the sentence "Hello world!" can be tokenized into ["Hello", "world", "!"].
 
-Character tokenizers split a string into a list of characters. For example, the sentence "Hello world!" can be tokenized into ["H", "e", "l", "l", "o", " ", "w", "o", "r", "l", "d", "!"].
+Character tokenizers split a string into a list of characters. So the same sentence "Hello world!" will be tokenized into ["H", "e", "l", "l", "o", " ", "w", "o", "r", "l", "d", "!"].
 
-Subword tokenizers split a string into a list of subwords. For example, the sentence "Hello world!" can be tokenized into ["He", "ll", "o", " ", "wo", "r", "ld", "!"].
+Subword tokenizers split a string into a list of subwords. For example, "Hello world!" might be tokenized into ["He", "ll", "o", " ", "wo", "r", "ld", "!"].
 
 Subword tokenizers are the most popular kind of tokenizers. They are used by many NLP models, including BERT, GPT, and GPT-2.
 
-We'll focus on subword tokenizers, since **BPE** is a subword tokenization algorithm.
+**BPE** is a subword tokenization algorithm, We'll focus on it in this document.
 
 ## Tokenization pipeline
 
@@ -33,29 +31,29 @@ The normalization operations can be combined then apply to the raw text. For exa
 
 ### Pre-tokenization
 
-Pre-tokenization is the act of splitting a text into smaller objects that give an upper bound to what your tokens will be at the end of training. A good way to think of this is that the pre-tokenizer will split your text into “words” and then, those words will be the boundaries of tokens. Your final tokens will be parts of those words.
+Pre-tokenization is the act of splitting a text into smaller objects that give an upper bound to what your tokens will be at the end of training. A good way to think of this is that the pre-tokenizer will split your text into “words” and then, those words will be the boundaries of tokens. The final tokens you get will be parts of those words.
 
 ### Model
 
-The model is the core of a tokenizer. It's the place to split your “words” into tokens by using the rules it has learned. It’s also responsible for mapping those tokens to their corresponding IDs in the vocabulary of the model.
+The model is the core of a tokenizer. It's the place to split your “words” into tokens by using the rules it has learned. It’s also responsible for mapping those tokens to token IDs which exist in the vocabulary of the model.
 
-This is also the part of the pipeline that needs training on your corpus.
+Model usually requires a training step first, which is to learn the rules to split the words into tokens. Then it can be used to tokenize a string.
 
-That is to say, to have a working tokenizer, we need:
+So, in order to have a working tokenizer, we need:
 
 1. pick up a tokenization algorithms (BPE, WordPiece, etc.)
 2. train the model on some corpus
-3. use the trained tokenizer to tokenize a string, i.e., encoding.
+3. use the trained tokenizer to tokenize a string (i.e. `encoding`)
 
-Well, we can also use a pretrained tokenizer directly, but that's another story, we won't cover it in this document.
+The `huggingface/tokenizers` supports loading **pretrained** tokenizer from file, which means we can skip the training step. But that's another story, we won't cover it in this document.
 
 ### Postprocessor
 
-Post-processing is the last step of the tokenization pipeline, to perform any additional transformation to the final result before it’s returned, like adding potential special tokens.
+Post-processing is the last step of the tokenization pipeline, to perform any additional transformation to the final result before it’s returned, like adding potential special tokens (like `[CLS]` and `[SEP]` shown in the diagram above).
 
 # Ok, I get it, what is BPE then?
 
-BPE stands for Byte-Pair-Encoding. It was initially developed as an algorithm to compress texts, and then used by OpenAI for tokenization when pretraining the GPT model. It’s used by a lot of Transformer models, including GPT, GPT-2, RoBERTa, BART, and DeBERTa. It's one of the most popular subword tokenization algorithm currently.
+BPE stands for **Byte-Pair-Encoding**. It was initially developed as an algorithm to compress texts, and then used by OpenAI for tokenization when pretraining the GPT model. It’s used by a lot of Transformer models, including GPT, GPT-2, RoBERTa, BART, and DeBERTa. It's one of the most popular subword tokenization algorithm nowadays.
 
 The Byte-Pair-Encoding works by starting with characters, while merging those that are the most frequently seen together, thus creating new tokens. It then works iteratively to build new tokens out of the most frequent pairs it sees in a corpus. BPE is able to build words it has never seen by using multiple subword tokens, and thus requires smaller vocabularies, with less chances of having “unk” (unknown) tokens.
 
@@ -155,7 +153,7 @@ Each step in the pipeline is defined as a `trait`, and there are different imple
 
 The `Decoder` trait is used to decode the tokenized string back to the original string, it's separate functionality, that's why it's not part of the pipeline.
 
-From the diagram we can see, the library applies builder design pattern extensively, which provides friendly interface for users to customize the tokenizer.
+From the diagram we can see, the library applies `builder` design pattern extensively, which provides friendly interface for users to customize the tokenizer.
 
 We won't cover all the components but only focus on `Model` part and see how it implemented the BPE algorithm.
 
