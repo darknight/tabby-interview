@@ -49,7 +49,7 @@ When we do tokenizing, the input text will go through a pipeline. Here’s a hig
 
 Normalization is, in a nutshell, a set of operations you apply to a raw string to make it less random or “cleaner”. Common operations include stripping whitespace, removing accented characters or lowercasing all text.
 
-The normalization operations can be combined then apply to the raw text. For example, we can first strip the whitespace, then lowercase the text, and finally remove the accented characters, etc.
+Multiple operations can be combined then applied to the raw text. For example, we can first strip the whitespace, then lowercase the text, and finally remove the accented characters, etc.
 
 ### Pre-tokenization
 
@@ -57,17 +57,18 @@ Pre-tokenization is the act of splitting a text into smaller objects that give a
 
 ### Model
 
-The model is the core of a tokenizer. It's the place to split your “words” into tokens by using the rules it has learned. It’s also responsible for mapping those tokens to token IDs which exist in the vocabulary of the model.
+The model is the core of a tokenizer. It's the place to split your “words” into tokens by using the rules it has learned. Some model is also responsible for mapping tokens to IDs which exist in the vocabulary of the model.
 
-Model usually requires a training step first, which is to learn the rules to split the words into tokens. Then it can be used to tokenize a string.
+Model usually requires a training step first, which is to learn the rules that split the words into tokens. After the training the model can be used to tokenize a string.
 
-So, in order to have a working tokenizer, we need:
+In summary, in order to have a working tokenizer, we need:
 
 1. pick up a tokenization algorithms (BPE, WordPiece, etc.)
 2. train the model on some corpus
 3. use the trained tokenizer to tokenize a string (i.e. `encoding`)
+4. (optional) decode tokens back to the string
 
-The `huggingface/tokenizers` supports loading **pretrained** tokenizer from file, which means we can skip the training step. But that's another story, we won't cover it in this document.
+By the way, the `huggingface/tokenizers` supports loading **pretrained** tokenizer from file, which means we can skip the training step. But that's another story, we won't cover it in this document.
 
 ### Postprocessor
 
@@ -75,13 +76,13 @@ Post-processing is the last step of the tokenization pipeline, to perform any ad
 
 # Ok, I get it, then what is BPE?
 
-BPE stands for **Byte-Pair-Encoding**. It was initially developed as an algorithm to compress texts, and then used by OpenAI for tokenization when pretraining the GPT model. It’s used by a lot of Transformer models, including GPT, GPT-2, RoBERTa, BART, and DeBERTa. It's one of the most popular subword tokenization algorithm nowadays.
+BPE stands for **Byte-Pair-Encoding** ([paper](https://arxiv.org/abs/1508.07909)). It was initially developed as an algorithm to compress texts, and then used by OpenAI for tokenization when pretraining the GPT model. It’s used by a lot of Transformer models, including GPT, GPT-2, RoBERTa, BART, and DeBERTa. It's one of the most popular subword tokenization algorithm nowadays.
 
-The Byte-Pair-Encoding works by starting with characters, while merging those that are the most frequently seen together, thus creating new tokens. It then works iteratively to build new tokens out of the most frequent pairs it sees in a corpus. BPE is able to build words it has never seen by using multiple subword tokens, and thus requires smaller vocabularies, with less chances of having “unk” (unknown) tokens.
+The Byte-Pair-Encoding works by starting with characters, while merging those that are the most frequently seen together, thus creating new tokens. It then works iteratively to build new tokens out of the most frequent pairs it sees in a corpus. BPE is able to build words it has never seen by using multiple subword tokens, and thus requires smaller vocabularies, with fewer chances of having “unk” (unknown) tokens.
 
 ## The training algorithm
 
-As we mentioned earlier, to have a functional BPE tokenizer, we need to train the model on some corpus.
+As we mentioned earlier, to have a functional tokenizer, we need to train the model on some corpus. BEP requires training before its usage.
 
 BPE training starts by computing the unique set of words used in the corpus (after normalization and pre-tokenization), then building the vocabulary by taking all the symbols used to write those words.
 
@@ -107,7 +108,9 @@ We start by splitting each word into characters, which we'll have
 ("h" "u" "g", 10), ("p" "u" "g", 5), ("p" "u" "n", 12), ("b" "u" "n", 4), ("h" "u" "g" "s", 5)
 ```
 
-We look at pairs, the most frequent pair is ("u", "g"), which is present total of 20 times. Thus, the first merge rule learned by the tokenizer is ("u", "g") -> "ug", which means that "ug" will be added to the vocabulary, and the pair should be merged in all the words of the corpus. At the end of this stage, the vocabulary and corpus look like this:
+We look at pairs, for example, "hug" will produce ("h", "u"), ("u", "g"), "pug" will produce ("p", "u"), ("u", "g"), etc.
+
+The most frequent pair is ("u", "g"), which is present total of 20 times. Thus, the first merge rule learned by the tokenizer is ("u", "g") -> "ug", which means that "ug" will be added to the vocabulary, and the pair should be merged in all the words of the corpus. At the end of this stage, the vocabulary and corpus look like this:
 
 ```
 Vocabulary: ["b", "g", "h", "n", "p", "s", "u", "ug"]
@@ -153,7 +156,7 @@ Corpus: ("hug", 10), ("pug", 5), ("pun", 12), ("bun", 4), ("hugs", 5)
 Merges: ("u", "g") -> "ug", ("u", "n") -> "un", ("h", "ug") -> "hug"
 ```
 
-If we tokenize the word `bug`, it will be tokenized as ["b", "ug"].
+If we tokenize the word `bug`, first we split it into characters, which give us ["b", "u", "g"], then we check if there is any merge rule can be applied, and we have `("u", "g") -> "ug"`. So in the end "bug" will be tokenized as ["b", "ug"].
 
 `mug`, however, will be tokenized as ["[UNK]", "ug"] since the letter "m" was not in the base vocabulary.
 
@@ -175,11 +178,44 @@ Here is the high level overview of library itself.
 
 Each step in the pipeline is defined as a `pub trait`, and there are different implementations for each step. The `Tokenizer` object wraps `TokenizerImpl` object, which groups all the steps together.
 
+The relevant definitions are:
+
+```rust
+pub struct Tokenizer(
+    TokenizerImpl<
+        ModelWrapper,
+        NormalizerWrapper,
+        PreTokenizerWrapper,
+        PostProcessorWrapper,
+        DecoderWrapper,
+    >,
+);
+pub struct TokenizerImpl<M, N, PT, PP, D> {
+    // Tokenizer parts
+    normalizer: Option<N>,
+    pre_tokenizer: Option<PT>,
+    model: M,
+    post_processor: Option<PP>,
+    decoder: Option<D>,
+
+    // other fields
+    ......
+}
+impl<M, N, PT, PP, D> TokenizerImpl<M, N, PT, PP, D>
+where
+    M: Model,
+    N: Normalizer,
+    PT: PreTokenizer,
+    PP: PostProcessor,
+    D: Decoder,
+{ ...... }
+```
+
 The `Decoder` trait is used to decode the tokens back to the original string, it's a separate functionality instead of a part of the pipeline.
 
-From the diagram we can see, the library applies `builder` design pattern extensively, which provides friendly interface to users to customize the tokenizer and underlying model.
+From the diagram we can see, the library applies `builder` design pattern extensively, which provides flexibilities to users to customize the tokenizer and underlying model.
 
-We won't cover all the components but only focus on `Model` part and see how it implemented the BPE algorithm.
+We won't cover all the components but only focus on `Model` part and see how it implements the BPE algorithm.
 
 ## The training algorithm implementation
 
@@ -193,7 +229,7 @@ From the calling chain we can see, there are two important method calls: `feed` 
 
 ### Feed
 
-The only job of `feed` is to calculate all the occurrences of each word for the given input (after normalization and pre-tokenization). Then save the result to `words` field of `BpeTrainer`.
+The responsibility of `feed` is to calculate all the occurrences of each word for the given input (after normalization and pre-tokenization). Then save the result to `words` field of `BpeTrainer`.
 
 ```rust
 pub struct BpeTrainer {
@@ -233,7 +269,7 @@ if !word_to_id.contains_key(&s) {
 }
 ```
 
-The `do_train` method has 5 steps:
+As above diagram shows, the `do_train` method consists of 5 steps, let's go through them one by one.
 
 **In step 1**, it adds all special tokens into `word_to_id` and `id_to_word`. Let's say we have `["[CLS]", "[SEP]"]` as special tokens, after step 1, we'll get:
 
@@ -261,9 +297,9 @@ id_to_word:
     ["[CLS]", "[SEP]", "b", "g", "h", "u"] // single characters are sorted before inserting
 ```
 
-After 1 & 2, we already have a basic vocabulary, then we start to learn the merge rules.
+After 1 & 2, we've built a basic vocabulary, next we start to learn the merge rules.
 
-Step 3-5 are the implementation of the training algorithm which we've described in the previous section. There's an important data structure called `Word` used in these steps, below is the definition of it:
+Step 3-5 are the implementation of the training algorithm which we've described in the previous section. There's an important data structure called `Word` used in these steps, below is the definition:
 
 ```rust
 pub(super) struct Word {
@@ -278,14 +314,14 @@ struct Symbol {
 }
 ```
 
-Essentially, `Word` is a list of `Symbol`, `Word` behaves like a linked list of token id. It is a numeric representation of a word, it tracks the merging state of the word during the training process.
+Essentially, `Word` is a list of `Symbol`, it behaves like a linked list of token id. It is a numeric representation of a word, it tracks the merging state of the word during the training process.
 
 **In step 3**, we tokenize the words by using basic vocabulary we've built in step 1 & 2. For the example corpus, we'll have:
 
 ```rust
 vec![
-    "hug" -> Word(4-5-3) which 4, 5, 3 are token id // not valid code, just for demonstration
-    "bug" -> Word(2-5-3) which 2, 5, 3 are token id // not valid code, just for demonstration
+    "hug" -> Word(4-5-3) // index=0, and 4, 5, 3 are token id // not valid code, just for demonstration
+    "bug" -> Word(2-5-3) // index=1, and 2, 5, 3 are token id // not valid code, just for demonstration
 ]
 ```
 
@@ -307,29 +343,46 @@ where_to_update:
 
 Now we have all the pairs, pairs occurrence count, and where they come from, we're ready to learn the merge rules.
 
-Before step 5, we build a heap, add all pairs into it. The heap is sorted by the occurrence count of the pair, so that we can always pick the most frequent pair to merge.
+Before step 5, we initialize a priority queue, add all pairs into it. This queue is sorted by the occurrence count of the pair, so that `queue.top()` is always the most frequent pair we have so far.
 
-**In step 5**, we keep popping the top element from the heap, merge the pair to generate a new token, try to add the new token into `word_to_id` and `id_to_word`, then we save this info as merge rule:
+**In step 5**, we enter a loop, we keep popping the top element from the heap, merge the pair to generate a new token, try to add the new token into `word_to_id` and `id_to_word`, then we save this info as a new merge rule:
 
-The core logic is as below:
+The core logic is described as below:
 
 ```rust
 type Pair = (u32, u32);
 let mut merges: Vec<(Pair, u32)> = vec![];
 
-let mut top = queue.pop().unwrap(); // queue is a BinaryHeap
-let part_a = &id_to_word[top.pair.0 as usize];
-let mut part_b = id_to_word[top.pair.1 as usize].to_owned();
-let new_token = format!("{}{}", part_a, part_b);
-let new_token_id = word_to_id.get(&new_token).copied().unwrap_or(id_to_word.len() as u32);
-if word_to_id.get(&new_token).is_none() {
-    id_to_word.push(new_token.clone());
-    word_to_id.insert(new_token.clone(), new_token_id);
+loop {
+    if queue.is_empty() {
+        break;
+    }
+
+    if word_to_id.len() >= self.vocab_size {
+        break;
+    }
+
+    let mut top = queue.pop().unwrap(); // queue is a BinaryHeap
+    let part_a = &id_to_word[top.pair.0 as usize];
+    let mut part_b = id_to_word[top.pair.1 as usize].to_owned();
+    let new_token = format!("{}{}", part_a, part_b);
+    let new_token_id = word_to_id.get(&new_token).copied().unwrap_or(id_to_word.len() as u32);
+    if word_to_id.get(&new_token).is_none() {
+        id_to_word.push(new_token.clone());
+        word_to_id.insert(new_token.clone(), new_token_id);
+    }
+    merges.push((top.pair, new_token_id)); // save the new merge rule
+
+    // update affected words from step 3
+    ......
+
+    queue.push(
+        // new pairs generated due to merges
+    )
 }
-merges.push((top.pair, new_token_id));
 ```
 
-Now we have a new merge rule, we need to find all the affected `Word`s, execute the merge. After the change, we'll have new pairs generated, we add them into the heap. This process is repeated until some termination condition is reached(for example, the desired vocabulary size).
+This process is repeated until some termination condition is reached (e.g. the desired vocabulary size).
 
 Go back to the example, after the first iteration, we'll have:
 
@@ -356,7 +409,20 @@ vec![
 ]
 ```
 
-When the iteration is done, we do some transformation on `merges` and `word_to_id`, save them to BPE model, the training is done.
+When the iteration is done, we do some transformation on `merges` and `word_to_id`, save them to BPE model instance and training is done.
+
+The relevant fields in BPE model are:
+
+```rust
+pub struct BPE {
+    pub(crate) vocab: HashMap<String, u32>, // transform `word_to_id` to this field
+    /// Reversed vocabulary, to rebuild sentences.
+    pub(crate) vocab_r: HashMap<u32, String>, // reverse `vocab`
+    /// Contains the mapping between Pairs and their (rank, new_id).
+    pub(crate) merges: HashMap<(u32, u32), (u32, u32)>,
+    ......
+}
+```
 
 ## The tokenization algorithm implementation
 
@@ -374,11 +440,11 @@ The simplest case is taking a plain ascii text such as:
 let output = tokenizer.encode("Hello, y'all! How are you ?", true)?;
 ```
 
-Following the calling chain, we can see we do `normalization`, `pre-tokenization` work just like what we do during the training phase.
+Following the calling chain, we can see we call `do_normalize`, `do_pre_tokenize` methods, just like the training phase.
 
 In the `do_tokenize` method, we actually delegate the work to `BPE` model we trained earlier.
 
-The heavy work is done in `BPE::merge_word` & `Word::merge_all` methods, which are the implementation of the tokenization algorithm we've covered in the previous section.
+The heavy work is done in `BPE::merge_word` & `Word::merge_all` methods, which are the implementation of the tokenization algorithm we've talked about in the previous section.
 
 Let's use the same example to explain what's done there.
 
@@ -398,7 +464,7 @@ merges:
     (5, 3) -> (0, 6) // 0 is the ranking of the merge rule, most frequent pair has the highest ranking
 ```
 
-Suppose we're tokenizing the word "gug", in `merge_word` method, we'll first split the word into characters, query model's `vocab` dictionary to get the token id. We build `Word` data structure again with the token id info, like the training phase.
+Suppose we're tokenizing the word "gug", in `merge_word` method, we'll first split the word into characters, query model's `vocab` dictionary to get the token id. We build `Word` data structure again with those ids.
 
 So after the iteration, we'll have the Word instance for "gug":
 
@@ -421,7 +487,7 @@ queue.extend(
     // find all the possible pairs from symbols
     // see if a merge rule exists for the pair
     // if so, create a struct which contains
-    struct {
+    struct ... {
         pos: // index of symbols where the pair is found
         rank: // ranking of the merge rule, the queue uses this to sort the elements
         new_id: // the new token id from the merge rule
@@ -431,8 +497,11 @@ queue.extend(
 while let Some(top) = queue.pop() {
     let right = self.symbols[self.symbols[top.pos].next as usize];
     let target_new_pair = (self.symbols[top.pos].c, right.c);
-    // merge top with right, update the word, maintain correct state
 
+    // merge top with right, update the word, maintain correct state
+    ......
+
+    // check left side of the merge
     let current = &self.symbols[top.pos];
     if current.prev >= 0 {
         let prev = current.prev as usize;
@@ -442,6 +511,7 @@ while let Some(top) = queue.pop() {
         queue.push(...);
     }
 
+    // check right side of the merge
     let next = current.next as usize;
     if next < self.symbols.len() {
         let next_symbol = self.symbols[next];
